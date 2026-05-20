@@ -1,0 +1,15 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: jio-eim-postgres
+    environment:
+      POSTGRES_DB: jio_eim
+      POSTGRES_USER: eim
+      POSTGRES_PASSWORD: eim_dev_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - jio_eim_pgdata:/var/lib/postgresql/data
+
+volumes:
+  jio_eim_pgdata:

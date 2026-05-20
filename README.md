@@ -1,20 +1,51 @@
-# Introduction 
-TODO: Give a short introduction of your project. Let this section explain the objectives or the motivation behind this project. 
+# JIO eIM Platform — Phase 1
 
-# Getting Started
-TODO: Guide users through getting your code up and running on their own system. In this section you can talk about:
-1.	Installation process
-2.	Software dependencies
-3.	Latest releases
-4.	API references
+GSMA SGP.32-compliant eSIM IoT Remote Manager (Phase 1).
 
-# Build and Test
-TODO: Describe and show how to build your code and run the tests. 
+## Services
 
-# Contribute
-TODO: Explain how other users and developers can contribute to make your code better. 
+| Service | Port | Description |
+|---------|------|-------------|
+| api-gateway | 8080 | JWT validation, header injection, reverse proxy |
+| user-service | 8086 | Login, JWT issuance, user management |
+| inventory-service | 8087 | SGP.32 vendor payload, device registry |
 
-If you want to learn more about creating good readme files then refer the following [guidelines](https://docs.microsoft.com/en-us/azure/devops/repos/git/create-a-readme?view=azure-devops). You can also seek inspiration from the below readme files:
-- [ASP.NET Core](https://github.com/aspnet/Home)
-- [Visual Studio Code](https://github.com/Microsoft/vscode)
-- [Chakra Core](https://github.com/Microsoft/ChakraCore)
+## Prerequisites
+
+- Java 21
+- Maven 3.9+
+- Docker (PostgreSQL)
+
+## Quick start
+
+```bash
+# Start PostgreSQL
+docker compose up -d
+
+# Build all modules
+mvn clean install -DskipTests
+
+# Terminal 1 — user-service
+mvn spring-boot:run -pl user-service
+
+# Terminal 2 — inventory-service
+mvn spring-boot:run -pl inventory-service
+
+# Terminal 3 — api-gateway
+mvn spring-boot:run -pl api-gateway
+```
+
+## Smoke test
+
+```bash
+# Login (via gateway)
+curl -X POST http://localhost:8080/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"Admin@123"}'
+
+# Use accessToken from response for inventory calls
+```
+
+Default admin: `admin` / `Admin@123` (change before production).
+
+See [jio-eim-phase1-dev-guide.md](jio-eim-phase1-dev-guide.md) for architecture and API details.
