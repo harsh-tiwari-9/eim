@@ -2,6 +2,7 @@ package com.jio.eim.inventory.service;
 
 import com.jio.eim.inventory.dto.InventoryRequest.EuiccEumCertDto;
 import com.jio.eim.inventory.dto.InventoryResponse.CertSummary;
+import com.jio.eim.inventory.ingest.CertValidationResult;
 import java.security.PublicKey;
 import java.security.Security;
 import java.security.cert.CertificateFactory;
@@ -20,6 +21,14 @@ public class CertificateService {
     static {
         if (Security.getProvider(BouncyCastleProvider.PROVIDER_NAME) == null) {
             Security.addProvider(new BouncyCastleProvider());
+        }
+    }
+
+    public CertValidationResult validateAndExtractSafe(EuiccEumCertDto certDto) {
+        try {
+            return CertValidationResult.ok(validateAndExtract(certDto));
+        } catch (Exception ex) {
+            return CertValidationResult.fail("Invalid certificate data: " + ex.getMessage());
         }
     }
 

@@ -13,6 +13,7 @@ import com.jio.eim.inventory.entity.IpaCapabilities;
 import com.jio.eim.inventory.repository.DeviceProfileRepository;
 import com.jio.eim.inventory.repository.EuiccCertRepository;
 import com.jio.eim.inventory.repository.InventoryDeviceRepository;
+import com.jio.eim.inventory.ingest.RegisterResult;
 import com.jio.eim.inventory.repository.IpaCapabilitiesRepository;
 import java.time.Instant;
 import java.util.List;
@@ -48,6 +49,18 @@ public class InventoryService {
 
     @Transactional
     public InventoryResponse register(InventoryRequest request) {
+        RegisterResult result = registerInternal(request);
+        InventoryDevice device = deviceRepository.findById(request.getEid())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Device not saved"));
+        return buildResponse(device, result.certSummary(), result.remarks());
+    }
+
+    public boolean deviceExists(String eid) {
+        return deviceRepository.existsById(eid);
+    }
+
+    @Transactional
+    public RegisterResult registerInternal(InventoryRequest request) {
         Instant now = Instant.now();
 
         InventoryDevice device = deviceRepository.findById(request.getEid()).orElse(new InventoryDevice());
@@ -63,6 +76,7 @@ public class InventoryService {
         deviceRepository.save(device);
 
         profileRepository.deleteByEid(request.getEid());
+        profileRepository.flush();
         if (request.getProfiles() != null) {
             for (ProfileDto profileDto : request.getProfiles()) {
                 DeviceProfile profile = new DeviceProfile();
@@ -83,7 +97,7 @@ public class InventoryService {
         }
         capabilitiesRepository.save(caps);
 
-        var certDto = request.getEuiccEumCerts().get(0);
+        var certDto = request.getEuiccEumCerts().getFirst();
         CertSummary certSummary = certificateService.validateAndExtract(certDto);
 
         EuiccCert cert = certRepository.findById(request.getEid()).orElse(new EuiccCert());
@@ -98,11 +112,11 @@ public class InventoryService {
         cert.setChainValid(certSummary.isChainValid());
         certRepository.save(cert);
 
-        String message = certSummary.isChainValid()
+        String remarks = certSummary.isChainValid()
                 ? "Device registered — certificate chain valid"
                 : "Device registered — certificate chain invalid";
 
-        return buildResponse(device, certSummary, message);
+        return new RegisterResult(certSummary, remarks);
     }
 
     @Transactional(readOnly = true)
