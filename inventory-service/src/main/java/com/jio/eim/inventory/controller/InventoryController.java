@@ -16,15 +16,52 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import com.jio.eim.inventory.dto.IngestJobResponse;
+import com.jio.eim.inventory.service.IngestJobQueryService;
+import com.jio.eim.inventory.service.IngestUploadService;
+import org.springframework.core.io.InputStreamResource;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.multipart.MultipartFile;
 
 @RestController
 @RequestMapping("/api/inventory")
 public class InventoryController {
 
     private final InventoryService inventoryService;
+    private final IngestUploadService ingestUploadService;
+    private final IngestJobQueryService ingestJobQueryService;
 
-    public InventoryController(InventoryService inventoryService) {
+    public InventoryController(
+            InventoryService inventoryService,
+            IngestUploadService ingestUploadService,
+            IngestJobQueryService ingestJobQueryService) {
         this.inventoryService = inventoryService;
+        this.ingestUploadService = ingestUploadService;
+        this.ingestJobQueryService = ingestJobQueryService;
+    }
+
+    @GetMapping("/jobs/{jobId}")
+    @PreAuthorize("hasAnyRole('SUPER_ADMIN','PLATFORM_ENGINEER','READ_ONLY','BSS_SYSTEM')")
+    public ApiResponse<IngestJobResponse> getJob(@PathVariable long jobId) {
+        return ApiResponse.ok("Job retrieved", ingestJobQueryService.getJob(jobId));
+    }
+
+    @GetMapping("/jobs/{jobId}/download")
+    @PreAuthorize("hasAnyRole('SUPER_ADMIN','PLATFORM_ENGINEER','BSS_SYSTEM')")
+    public ResponseEntity<InputStreamResource> downloadJobResult(@PathVariable long jobId) {
+        return ingestJobQueryService.downloadResult(jobId);
+    }
+
+    @PostMapping(value = "/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PreAuthorize("hasAnyRole('SUPER_ADMIN','PLATFORM_ENGINEER','BSS_SYSTEM')")
+    public ResponseEntity<ApiResponse<IngestJobResponse>> upload(
+            @RequestParam("file") MultipartFile file,
+            @RequestHeader("X-User-Email") String uploadedBy) {
+        IngestJobResponse data = ingestUploadService.upload(file, uploadedBy);
+        return ResponseEntity.status(HttpStatus.ACCEPTED)
+                .body(ApiResponse.ok("Upload accepted — job created", data));
     }
 
     @PostMapping

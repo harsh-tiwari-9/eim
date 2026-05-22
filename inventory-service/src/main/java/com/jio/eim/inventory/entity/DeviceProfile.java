@@ -6,6 +6,8 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 @Entity
 @Table(schema = "inventory", name = "device_profiles")
@@ -24,6 +26,7 @@ public class DeviceProfile {
     @Column(nullable = false, length = 20)
     private String state;
 
+    @JdbcTypeCode(SqlTypes.CHAR)
     @Column(name = "profile_class", length = 1)
     private String profileClass;
 
