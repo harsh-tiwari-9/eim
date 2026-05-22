@@ -3,9 +3,12 @@ package com.jio.eim.inventory.controller;
 import com.jio.eim.inventory.dto.ApiResponse;
 import com.jio.eim.inventory.dto.InventoryRequest;
 import com.jio.eim.inventory.dto.InventoryResponse;
+import com.jio.eim.inventory.dto.PagedResponse;
 import com.jio.eim.inventory.service.InventoryService;
 import jakarta.validation.Valid;
-import java.util.List;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.web.PageableDefault;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -75,13 +78,16 @@ public class InventoryController {
         return ResponseEntity.ok(ApiResponse.ok(message, data));
     }
 
-    @GetMapping
+    @GetMapping("/list")
     @PreAuthorize("hasAnyRole('SUPER_ADMIN','PLATFORM_ENGINEER','READ_ONLY','BSS_SYSTEM')")
-    public ApiResponse<List<InventoryResponse>> list(
+    public ApiResponse<PagedResponse<InventoryResponse>> list(
             @RequestParam(required = false) String ownerId,
             @RequestParam(required = false) String status,
-            @RequestParam(required = false) String search) {
-        return ApiResponse.ok("Devices retrieved", inventoryService.list(ownerId, status, search));
+            @RequestParam(required = false) String search,
+            @PageableDefault(size = 20, sort = "registeredAt", direction = Sort.Direction.DESC)
+                    Pageable pageable) {
+        return ApiResponse.ok(
+                "Devices retrieved", inventoryService.list(ownerId, status, search, pageable));
     }
 
     @GetMapping("/{eid}")
