@@ -6,6 +6,7 @@ import com.jio.eim.inventory.dto.InventoryResponse;
 import com.jio.eim.inventory.dto.InventoryResponse.CertSummary;
 import com.jio.eim.inventory.dto.InventoryResponse.IpaCapabilitiesView;
 import com.jio.eim.inventory.dto.InventoryResponse.ProfileView;
+import com.jio.eim.inventory.dto.PagedResponse;
 import com.jio.eim.inventory.entity.DeviceProfile;
 import com.jio.eim.inventory.entity.EuiccCert;
 import com.jio.eim.inventory.entity.InventoryDevice;
@@ -17,6 +18,8 @@ import com.jio.eim.inventory.ingest.RegisterResult;
 import com.jio.eim.inventory.repository.IpaCapabilitiesRepository;
 import java.time.Instant;
 import java.util.List;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -132,14 +135,22 @@ public class InventoryService {
     }
 
     @Transactional(readOnly = true)
-    public List<InventoryResponse> list(String ownerId, String status, String search) {
-        return deviceRepository.search(
-                        blankToNull(ownerId),
-                        blankToNull(status),
-                        blankToNull(search))
-                .stream()
-                .map(d -> buildResponse(d, certRepository.findById(d.getEid()).map(this::toCertSummary).orElse(null), null))
+    public PagedResponse<InventoryResponse> list(
+            String ownerId, String status, String search, Pageable pageable) {
+        Page<InventoryDevice> devicesPage = deviceRepository.search(
+                blankToNull(ownerId),
+                blankToNull(status),
+                blankToNull(search),
+                pageable);
+
+        List<InventoryResponse> content = devicesPage.getContent().stream()
+                .map(d -> buildResponse(
+                        d,
+                        certRepository.findById(d.getEid()).map(this::toCertSummary).orElse(null),
+                        null))
                 .toList();
+
+        return PagedResponse.from(devicesPage, content);
     }
 
     @Transactional
