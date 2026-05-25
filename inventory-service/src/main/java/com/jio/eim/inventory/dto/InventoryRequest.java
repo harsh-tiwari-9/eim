@@ -9,7 +9,7 @@ import java.util.List;
 public class InventoryRequest {
 
     @NotBlank
-    @Pattern(regexp = "[0-9A-F]{20,32}")
+    @Pattern(regexp = "\\d{32}", message = "eid must be exactly 32 digits")
     private String eid;
 
     @NotBlank

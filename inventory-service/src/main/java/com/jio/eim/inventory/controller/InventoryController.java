@@ -1,16 +1,22 @@
 package com.jio.eim.inventory.controller;
 
 import com.jio.eim.inventory.dto.ApiResponse;
+import com.jio.eim.inventory.dto.InventoryListRequest;
 import com.jio.eim.inventory.dto.InventoryRequest;
 import com.jio.eim.inventory.dto.InventoryResponse;
 import com.jio.eim.inventory.dto.PagedResponse;
 import com.jio.eim.inventory.service.InventoryService;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
-import org.springframework.data.web.PageableDefault;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -30,6 +36,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 @RestController
 @RequestMapping("/api/inventory")
+@Validated
 public class InventoryController {
 
     private final InventoryService inventoryService;
@@ -78,27 +85,28 @@ public class InventoryController {
         return ResponseEntity.ok(ApiResponse.ok(message, data));
     }
 
-    @GetMapping("/list")
+    @PostMapping("/list")
     @PreAuthorize("hasAnyRole('SUPER_ADMIN','PLATFORM_ENGINEER','READ_ONLY','BSS_SYSTEM')")
     public ApiResponse<PagedResponse<InventoryResponse>> list(
-            @RequestParam(required = false) String ownerId,
-            @RequestParam(required = false) String status,
-            @RequestParam(required = false) String search,
-            @PageableDefault(size = 20, sort = "registeredAt", direction = Sort.Direction.DESC)
-                    Pageable pageable) {
-        return ApiResponse.ok(
-                "Devices retrieved", inventoryService.list(ownerId, status, search, pageable));
+            @Valid @RequestBody(required = false) InventoryListRequest filters,
+            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
+        InventoryListRequest req = filters != null ? filters : new InventoryListRequest();
+        Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "registeredAt"));
+        return ApiResponse.ok("Devices retrieved", inventoryService.list(req.getOwnerId(), req.getStatus(), req.getSearch(), pageable));
     }
 
     @GetMapping("/{eid}")
     @PreAuthorize("hasAnyRole('SUPER_ADMIN','PLATFORM_ENGINEER','READ_ONLY','BSS_SYSTEM')")
-    public ApiResponse<InventoryResponse> get(@PathVariable String eid) {
+    public ApiResponse<InventoryResponse> get(
+            @PathVariable @NotBlank @Pattern(regexp = "\\d{32}", message = "eid must be exactly 32 digits") String eid) {
         return ApiResponse.ok("Device retrieved", inventoryService.get(eid));
     }
 
     @DeleteMapping("/{eid}")
     @PreAuthorize("hasAnyRole('SUPER_ADMIN','PLATFORM_ENGINEER')")
-    public ApiResponse<Void> delete(@PathVariable String eid) {
+    public ApiResponse<Void> delete(
+            @PathVariable @NotBlank @Pattern(regexp = "\\d{32}", message = "eid must be exactly 32 digits") String eid) {
         inventoryService.delete(eid);
         return ApiResponse.ok("Device deleted", null);
     }

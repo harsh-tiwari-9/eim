@@ -157,6 +157,9 @@ public class InventoryService {
     public void delete(String eid) {
         InventoryDevice device = deviceRepository.findById(eid)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Device not found"));
+        if (DELETED.equals(device.getStatus())) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Device not found");
+        }
         device.setStatus(DELETED);
         device.setUpdatedAt(Instant.now());
         deviceRepository.save(device);
