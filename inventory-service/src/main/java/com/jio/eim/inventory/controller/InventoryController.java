@@ -2,6 +2,7 @@ package com.jio.eim.inventory.controller;
 
 import com.jio.eim.inventory.dto.ApiResponse;
 import com.jio.eim.inventory.dto.InventoryRequest;
+import com.jio.eim.inventory.ingest.IngestJobStatus;
 import com.jio.eim.inventory.dto.InventoryResponse;
 import com.jio.eim.inventory.dto.PagedResponse;
 import com.jio.eim.inventory.service.InventoryService;
@@ -49,6 +50,20 @@ public class InventoryController {
     @PreAuthorize("hasAnyRole('SUPER_ADMIN','PLATFORM_ENGINEER','READ_ONLY','BSS_SYSTEM')")
     public ApiResponse<IngestJobResponse> getJob(@PathVariable long jobId) {
         return ApiResponse.ok("Job retrieved", ingestJobQueryService.getJob(jobId));
+    }
+
+    @GetMapping("/jobs")
+    @PreAuthorize("hasAnyRole('SUPER_ADMIN','PLATFORM_ENGINEER','READ_ONLY','BSS_SYSTEM')")
+    public ApiResponse<PagedResponse<IngestJobResponse>> listJobs(
+            @RequestParam(required = false) IngestJobStatus status,
+            @RequestParam(required = false) String uploadedBy,
+            @PageableDefault(size = 10, sort = "createdAt", direction = Sort.Direction.DESC)
+            Pageable pageable
+    ) {
+        return ApiResponse.ok(
+                "Jobs retrieved",
+                ingestJobQueryService.listJobs(status, uploadedBy, pageable)
+        );
     }
 
     @GetMapping("/jobs/{jobId}/download")
