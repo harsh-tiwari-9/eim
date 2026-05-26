@@ -13,12 +13,14 @@ public interface InventoryDeviceRepository extends JpaRepository<InventoryDevice
             SELECT d FROM InventoryDevice d
             WHERE (:ownerId IS NULL OR d.ownerId = :ownerId)
               AND (:status IS NULL OR d.status = :status)
+              AND (:eid IS NULL OR d.eid = :eid)
               AND (:search IS NULL OR LOWER(d.eid) LIKE LOWER(CONCAT(CAST(:search AS string), '%')))
               AND d.status <> 'DELETED'
             """)
     Page<InventoryDevice> search(
             @Param("ownerId") String ownerId,
             @Param("status") String status,
+            @Param("eid") String eid,
             @Param("search") String search,
             Pageable pageable);
 }

@@ -93,18 +93,18 @@ public class InventoryController {
             @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
         InventoryListRequest req = filters != null ? filters : new InventoryListRequest();
         Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "registeredAt"));
-        return ApiResponse.ok("Devices retrieved", inventoryService.list(req.getOwnerId(), req.getStatus(), req.getSearch(), pageable));
+        return ApiResponse.ok("Devices retrieved", inventoryService.list(req.getOwnerId(), req.getStatus(), req.getEid(), req.getSearch(), pageable));
     }
 
-    @GetMapping("/{eid}")
-    @PreAuthorize("hasAnyRole('SUPER_ADMIN','PLATFORM_ENGINEER','READ_ONLY','BSS_SYSTEM')")
-    public ApiResponse<InventoryResponse> get(
-            @PathVariable @NotBlank @Pattern(regexp = "\\d{32}", message = "eid must be exactly 32 digits") String eid) {
-        return ApiResponse.ok("Device retrieved", inventoryService.get(eid));
-    }
+    // @GetMapping("/{eid}")
+    // @PreAuthorize("hasAnyRole('SUPER_ADMIN','PLATFORM_ENGINEER','READ_ONLY','BSS_SYSTEM')")
+    // public ApiResponse<InventoryResponse> get(
+    //         @PathVariable @NotBlank @Pattern(regexp = "\\d{32}", message = "eid must be exactly 32 digits") String eid) {
+    //     return ApiResponse.ok("Device retrieved", inventoryService.get(eid));
+    // }
 
     @DeleteMapping("/{eid}")
-    @PreAuthorize("hasAnyRole('SUPER_ADMIN','PLATFORM_ENGINEER')")
+    @PreAuthorize("hasAnyRole('SUPER_ADMIN')")
     public ApiResponse<Void> delete(
             @PathVariable @NotBlank @Pattern(regexp = "\\d{32}", message = "eid must be exactly 32 digits") String eid) {
         inventoryService.delete(eid);
