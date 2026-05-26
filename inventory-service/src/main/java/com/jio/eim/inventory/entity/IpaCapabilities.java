@@ -4,9 +4,13 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import lombok.Getter;
+import lombok.Setter;
 
 @Entity
 @Table(schema = "inventory", name = "ipa_capabilities")
+@Getter
+@Setter
 public class IpaCapabilities {
 
     @Id
@@ -18,28 +22,4 @@ public class IpaCapabilities {
 
     @Column(name = "indirect_rsp_server_communication", nullable = false)
     private boolean indirectRspServerCommunication;
-
-    public String getEid() {
-        return eid;
-    }
-
-    public void setEid(String eid) {
-        this.eid = eid;
-    }
-
-    public boolean isDirectRspServerCommunication() {
-        return directRspServerCommunication;
-    }
-
-    public void setDirectRspServerCommunication(boolean directRspServerCommunication) {
-        this.directRspServerCommunication = directRspServerCommunication;
-    }
-
-    public boolean isIndirectRspServerCommunication() {
-        return indirectRspServerCommunication;
-    }
-
-    public void setIndirectRspServerCommunication(boolean indirectRspServerCommunication) {
-        this.indirectRspServerCommunication = indirectRspServerCommunication;
-    }
 }

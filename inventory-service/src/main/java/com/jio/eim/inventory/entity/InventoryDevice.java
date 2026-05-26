@@ -6,9 +6,13 @@ import jakarta.persistence.Id;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import java.time.Instant;
+import lombok.Getter;
+import lombok.Setter;
 
 @Entity
 @Table(schema = "inventory", name = "devices")
+@Getter
+@Setter
 public class InventoryDevice {
 
     @Id
@@ -36,61 +40,5 @@ public class InventoryDevice {
     @PreUpdate
     void onUpdate() {
         this.updatedAt = Instant.now();
-    }
-
-    public String getEid() {
-        return eid;
-    }
-
-    public void setEid(String eid) {
-        this.eid = eid;
-    }
-
-    public String getOwnerId() {
-        return ownerId;
-    }
-
-    public void setOwnerId(String ownerId) {
-        this.ownerId = ownerId;
-    }
-
-    public boolean isAutoEnable() {
-        return autoEnable;
-    }
-
-    public void setAutoEnable(boolean autoEnable) {
-        this.autoEnable = autoEnable;
-    }
-
-    public boolean isAutoDelete() {
-        return autoDelete;
-    }
-
-    public void setAutoDelete(boolean autoDelete) {
-        this.autoDelete = autoDelete;
-    }
-
-    public String getStatus() {
-        return status;
-    }
-
-    public void setStatus(String status) {
-        this.status = status;
-    }
-
-    public Instant getRegisteredAt() {
-        return registeredAt;
-    }
-
-    public void setRegisteredAt(Instant registeredAt) {
-        this.registeredAt = registeredAt;
-    }
-
-    public Instant getUpdatedAt() {
-        return updatedAt;
-    }
-
-    public void setUpdatedAt(Instant updatedAt) {
-        this.updatedAt = updatedAt;
     }
 }

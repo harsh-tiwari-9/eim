@@ -8,12 +8,17 @@ import jakarta.persistence.Id;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
 import java.time.Instant;
+import lombok.Getter;
+import lombok.Setter;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
 @Entity
 @Table(schema = "psmo", name = "operation_logs")
+@Getter
+@Setter
 public class OperationLog {
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -38,22 +43,4 @@ public class OperationLog {
     void onCreate() {
         if (ts == null) ts = Instant.now();
     }
-
-    public Long getId() { return id; }
-    public void setId(Long id) { this.id = id; }
-
-    public Long getOperationId() { return operationId; }
-    public void setOperationId(Long operationId) { this.operationId = operationId; }
-
-    public String getEventType() { return eventType; }
-    public void setEventType(String eventType) { this.eventType = eventType; }
-
-    public String getActor() { return actor; }
-    public void setActor(String actor) { this.actor = actor; }
-
-    public String getDetails() { return details; }
-    public void setDetails(String details) { this.details = details; }
-
-    public Instant getTs() { return ts; }
-    public void setTs(Instant ts) { this.ts = ts; }
 }

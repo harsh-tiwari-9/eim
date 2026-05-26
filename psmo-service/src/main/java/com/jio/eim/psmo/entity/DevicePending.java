@@ -8,9 +8,13 @@ import jakarta.persistence.Id;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
 import java.time.Instant;
+import lombok.Getter;
+import lombok.Setter;
 
 @Entity
 @Table(schema = "psmo", name = "device_pending")
+@Getter
+@Setter
 public class DevicePending {
 
     @Id
@@ -30,16 +34,4 @@ public class DevicePending {
     void onCreate() {
         if (queuedAt == null) queuedAt = Instant.now();
     }
-
-    public Long getId() { return id; }
-    public void setId(Long id) { this.id = id; }
-
-    public String getEid() { return eid; }
-    public void setEid(String eid) { this.eid = eid; }
-
-    public Long getOperationId() { return operationId; }
-    public void setOperationId(Long operationId) { this.operationId = operationId; }
-
-    public Instant getQueuedAt() { return queuedAt; }
-    public void setQueuedAt(Instant queuedAt) { this.queuedAt = queuedAt; }
 }

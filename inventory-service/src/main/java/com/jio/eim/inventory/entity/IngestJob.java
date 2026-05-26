@@ -12,9 +12,13 @@ import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import java.time.Instant;
+import lombok.Getter;
+import lombok.Setter;
 
 @Entity
 @Table(schema = "inventory", name = "ingest_jobs")
+@Getter
+@Setter
 public class IngestJob {
 
     @Id
@@ -73,109 +77,5 @@ public class IngestJob {
     @PreUpdate
     void onUpdate() {
         updatedAt = Instant.now();
-    }
-
-    public Long getId() {
-        return id;
-    }
-
-    public void setId(Long id) {
-        this.id = id;
-    }
-
-    public String getFileName() {
-        return fileName;
-    }
-
-    public void setFileName(String fileName) {
-        this.fileName = fileName;
-    }
-
-    public IngestJobStatus getStatus() {
-        return status;
-    }
-
-    public void setStatus(IngestJobStatus status) {
-        this.status = status;
-    }
-
-    public long getTotalRecords() {
-        return totalRecords;
-    }
-
-    public void setTotalRecords(long totalRecords) {
-        this.totalRecords = totalRecords;
-    }
-
-    public long getProcessedRecords() {
-        return processedRecords;
-    }
-
-    public void setProcessedRecords(long processedRecords) {
-        this.processedRecords = processedRecords;
-    }
-
-    public long getFailedRecords() {
-        return failedRecords;
-    }
-
-    public void setFailedRecords(long failedRecords) {
-        this.failedRecords = failedRecords;
-    }
-
-    public String getUploadedBy() {
-        return uploadedBy;
-    }
-
-    public void setUploadedBy(String uploadedBy) {
-        this.uploadedBy = uploadedBy;
-    }
-
-    public String getInputFilePath() {
-        return inputFilePath;
-    }
-
-    public void setInputFilePath(String inputFilePath) {
-        this.inputFilePath = inputFilePath;
-    }
-
-    public String getOutputFilePath() {
-        return outputFilePath;
-    }
-
-    public void setOutputFilePath(String outputFilePath) {
-        this.outputFilePath = outputFilePath;
-    }
-
-    public String getRemarks() {
-        return remarks;
-    }
-
-    public void setRemarks(String remarks) {
-        this.remarks = remarks;
-    }
-
-    public Instant getCreatedAt() {
-        return createdAt;
-    }
-
-    public void setCreatedAt(Instant createdAt) {
-        this.createdAt = createdAt;
-    }
-
-    public Instant getUpdatedAt() {
-        return updatedAt;
-    }
-
-    public void setUpdatedAt(Instant updatedAt) {
-        this.updatedAt = updatedAt;
-    }
-
-    public Instant getCompletedAt() {
-        return completedAt;
-    }
-
-    public void setCompletedAt(Instant completedAt) {
-        this.completedAt = completedAt;
     }
 }

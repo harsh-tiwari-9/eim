@@ -2,7 +2,11 @@ package com.jio.eim.psmo.dto;
 
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
+import lombok.Getter;
+import lombok.Setter;
 
+@Getter
+@Setter
 public class PsmoOperationRequest {
 
     @NotBlank
@@ -14,13 +18,4 @@ public class PsmoOperationRequest {
     private String type;
 
     private String targetIccid;
-
-    public String getEid() { return eid; }
-    public void setEid(String eid) { this.eid = eid; }
-
-    public String getType() { return type; }
-    public void setType(String type) { this.type=type; }
-
-    public String getTargetIccid() { return targetIccid; }
-    public void setTargetIccid(String targetIccid) { this.targetIccid = targetIccid; }
 }

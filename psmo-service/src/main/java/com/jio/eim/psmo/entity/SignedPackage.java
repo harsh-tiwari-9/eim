@@ -6,9 +6,13 @@ import jakarta.persistence.Id;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
 import java.time.Instant;
+import lombok.Getter;
+import lombok.Setter;
 
 @Entity
-@Table(schema = "psmo", name="signed_packages")
+@Table(schema = "psmo", name = "signed_packages")
+@Getter
+@Setter
 public class SignedPackage {
 
     @Id
@@ -33,22 +37,4 @@ public class SignedPackage {
     void onCreate() {
         if (createdAt == null) createdAt = Instant.now();
     }
-
-    public Long getOperationId() { return operationId; }
-    public void setOperationId(Long operationId) { this.operationId = operationId; }
-
-    public byte[] getPackageBytes() { return packageBytes; }
-    public void setPackageBytes(byte[] packageBytes) { this.packageBytes = packageBytes; }
-
-    public String getPackageFormat() { return packageFormat; }
-    public void setPackageFormat(String packageFormat) { this.packageFormat = packageFormat; }
-
-    public String getSignatureAlg() { return signatureAlg; }
-    public void setSignatureAlg(String signatureAlg) { this.signatureAlg = signatureAlg; }
-
-    public byte[] getSignature() { return signature; }
-    public void setSignature(byte[] signature) { this.signature = signature; }
-
-    public Instant getCreatedAt() { return createdAt; }
-    public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
 }

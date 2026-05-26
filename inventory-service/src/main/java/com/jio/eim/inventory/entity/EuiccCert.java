@@ -5,9 +5,13 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import java.time.Instant;
+import lombok.Getter;
+import lombok.Setter;
 
 @Entity
 @Table(schema = "inventory", name = "euicc_certs")
+@Getter
+@Setter
 public class EuiccCert {
 
     @Id
@@ -40,84 +44,4 @@ public class EuiccCert {
 
     @Column(name = "chain_valid", nullable = false)
     private boolean chainValid;
-
-    public String getEid() {
-        return eid;
-    }
-
-    public void setEid(String eid) {
-        this.eid = eid;
-    }
-
-    public String getEuiccCertBase64() {
-        return euiccCertBase64;
-    }
-
-    public void setEuiccCertBase64(String euiccCertBase64) {
-        this.euiccCertBase64 = euiccCertBase64;
-    }
-
-    public String getEumCertBase64() {
-        return eumCertBase64;
-    }
-
-    public void setEumCertBase64(String eumCertBase64) {
-        this.eumCertBase64 = eumCertBase64;
-    }
-
-    public String getEuiccPublicKeyHex() {
-        return euiccPublicKeyHex;
-    }
-
-    public void setEuiccPublicKeyHex(String euiccPublicKeyHex) {
-        this.euiccPublicKeyHex = euiccPublicKeyHex;
-    }
-
-    public String getEuiccSubject() {
-        return euiccSubject;
-    }
-
-    public void setEuiccSubject(String euiccSubject) {
-        this.euiccSubject = euiccSubject;
-    }
-
-    public String getEumSubject() {
-        return eumSubject;
-    }
-
-    public void setEumSubject(String eumSubject) {
-        this.eumSubject = eumSubject;
-    }
-
-    public String getCiReference() {
-        return ciReference;
-    }
-
-    public void setCiReference(String ciReference) {
-        this.ciReference = ciReference;
-    }
-
-    public Instant getCertValidFrom() {
-        return certValidFrom;
-    }
-
-    public void setCertValidFrom(Instant certValidFrom) {
-        this.certValidFrom = certValidFrom;
-    }
-
-    public Instant getCertValidTo() {
-        return certValidTo;
-    }
-
-    public void setCertValidTo(Instant certValidTo) {
-        this.certValidTo = certValidTo;
-    }
-
-    public boolean isChainValid() {
-        return chainValid;
-    }
-
-    public void setChainValid(boolean chainValid) {
-        this.chainValid = chainValid;
-    }
 }

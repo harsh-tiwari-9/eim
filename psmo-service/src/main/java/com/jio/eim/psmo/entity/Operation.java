@@ -9,11 +9,15 @@ import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import java.time.Instant;
+import lombok.Getter;
+import lombok.Setter;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
 @Entity
 @Table(schema = "psmo", name = "operations")
+@Getter
+@Setter
 public class Operation {
 
     @Id
@@ -70,42 +74,4 @@ public class Operation {
     void onUpdate() {
         updatedAt = Instant.now();
     }
-    public Long getId() { return id; }
-    public void setId(Long id) { this.id = id; }
-
-    public String getEid() { return eid; }
-    public void setEid(String eid) { this.eid = eid; }
-
-    public String getType() { return type; }
-    public void setType(String type) { this.type = type; }
-
-    public String getTargetIccid() { return targetIccid; }
-    public void setTargetIccid(String targetIccid) { this.targetIccid = targetIccid; }
-
-    public String getParams() { return params; }
-    public void setParams(String params) { this.params = params; }
-
-    public String getStatus() { return status; }
-    public void setStatus(String status) { this.status = status; }
-
-    public String getRequestedBy() { return requestedBy; }
-    public void setRequestedBy(String requestedBy) { this.requestedBy = requestedBy; }
-
-    public String getResultPayload() { return resultPayload; }
-    public void setResultPayload(String resultPayload) { this.resultPayload = resultPayload; }
-
-    public Instant getCreatedAt() { return createdAt; }
-    public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
-
-    public Instant getUpdatedAt() { return updatedAt; }
-    public void setUpdatedAt(Instant updatedAt) { this.updatedAt = updatedAt; }
-
-    public Instant getSignedAt() { return signedAt; }
-    public void setSignedAt(Instant signedAt) { this.signedAt = signedAt; }
-
-    public Instant getSentAt() { return sentAt; }
-    public void setSentAt(Instant sentAt) { this.sentAt = sentAt; }
-
-    public Instant getCompletedAt() { return completedAt; }
-    public void setCompletedAt(Instant completedAt) { this.completedAt = completedAt; }
 }
