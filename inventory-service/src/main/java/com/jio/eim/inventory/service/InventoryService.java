@@ -122,24 +122,25 @@ public class InventoryService {
         return new RegisterResult(certSummary, remarks);
     }
 
-    @Transactional(readOnly = true)
-    public InventoryResponse get(String eid) {
-        InventoryDevice device = deviceRepository.findById(eid)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Device not found"));
-        if (DELETED.equals(device.getStatus())) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Device not found");
-        }
-        EuiccCert cert = certRepository.findById(eid).orElse(null);
-        CertSummary certSummary = cert == null ? null : toCertSummary(cert);
-        return buildResponse(device, certSummary, "Device retrieved");
-    }
+    // @Transactional(readOnly = true)
+    // public InventoryResponse get(String eid) {
+    //     InventoryDevice device = deviceRepository.findById(eid)
+    //             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Device not found"));
+    //     if (DELETED.equals(device.getStatus())) {
+    //         throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Device not found");
+    //     }
+    //     EuiccCert cert = certRepository.findById(eid).orElse(null);
+    //     CertSummary certSummary = cert == null ? null : toCertSummary(cert);
+    //     return buildResponse(device, certSummary, "Device retrieved");
+    // }
 
     @Transactional(readOnly = true)
     public PagedResponse<InventoryResponse> list(
-            String ownerId, String status, String search, Pageable pageable) {
+            String ownerId, String status, String eid, String search, Pageable pageable) {
         Page<InventoryDevice> devicesPage = deviceRepository.search(
                 blankToNull(ownerId),
                 blankToNull(status),
+                blankToNull(eid),
                 blankToNull(search),
                 pageable);
 
@@ -157,6 +158,9 @@ public class InventoryService {
     public void delete(String eid) {
         InventoryDevice device = deviceRepository.findById(eid)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Device not found"));
+        if (DELETED.equals(device.getStatus())) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Device not found");
+        }
         device.setStatus(DELETED);
         device.setUpdatedAt(Instant.now());
         deviceRepository.save(device);
