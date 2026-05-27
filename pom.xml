@@ -22,6 +22,7 @@
         <module>api-gateway</module>
         <module>inventory-service</module>
         <module>user-service</module>
+        <module>psmo-service</module>
     </modules>
 
     <properties>

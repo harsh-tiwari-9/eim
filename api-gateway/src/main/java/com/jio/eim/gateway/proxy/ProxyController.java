@@ -29,14 +29,17 @@ public class ProxyController {
     private final RestTemplate restTemplate;
     private final String userServiceUrl;
     private final String inventoryServiceUrl;
+    private final String psmoServiceUrl;
 
     public ProxyController(
             RestTemplate restTemplate,
             @Value("${eim.services.user-url}") String userServiceUrl,
-            @Value("${eim.services.inventory-url}") String inventoryServiceUrl) {
+            @Value("${eim.services.inventory-url}") String inventoryServiceUrl,
+            @Value("${eim.services.psmo-url}") String psmoServiceUrl) {
         this.restTemplate = restTemplate;
         this.userServiceUrl = trimTrailingSlash(userServiceUrl);
         this.inventoryServiceUrl = trimTrailingSlash(inventoryServiceUrl);
+        this.psmoServiceUrl = trimTrailingSlash(psmoServiceUrl);
     }
 
     @RequestMapping("/**")
@@ -76,6 +79,9 @@ public class ProxyController {
         }
         if (path.startsWith("/api/inventory")) {
             return inventoryServiceUrl;
+        }
+        if (path.startsWith("/api/psmo")) {
+            return psmoServiceUrl;
         }
         throw new IllegalArgumentException("No route for path: " + path);
     }

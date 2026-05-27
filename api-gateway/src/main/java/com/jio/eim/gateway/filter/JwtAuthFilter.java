@@ -62,7 +62,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
 
             filterChain.doFilter(wrapped, response);
         } catch (ExpiredJwtException ex) {
-            unauthorized(response, "Token has expired — please login again");
+            unauthorized(response, "Token has expired, please login again");
         } catch (io.jsonwebtoken.JwtException ex) {
             unauthorized(response, "Invalid token");
         }

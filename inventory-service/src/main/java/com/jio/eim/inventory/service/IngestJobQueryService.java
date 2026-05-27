@@ -12,6 +12,11 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
+import java.util.List;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.transaction.annotation.Transactional;
+import com.jio.eim.inventory.dto.PagedResponse;
 
 @Service
 public class IngestJobQueryService {
@@ -22,6 +27,21 @@ public class IngestJobQueryService {
     public IngestJobQueryService(IngestJobRepository jobRepository, BlobStorageService blobStorageService) {
         this.jobRepository = jobRepository;
         this.blobStorageService = blobStorageService;
+    }
+
+    @Transactional(readOnly = true)
+    public PagedResponse<IngestJobResponse> listJobs(
+            IngestJobStatus status,
+            String uploadedBy,
+            Pageable pageable) {
+
+        Page<IngestJob> jobsPage = jobRepository.search(status,blankToNull(uploadedBy), pageable);
+
+        List<IngestJobResponse> content = jobsPage.getContent().stream()
+                .map(IngestJobMapper::toResponse)
+                .toList();
+
+        return PagedResponse.from(jobsPage, content);
     }
 
     public IngestJobResponse getJob(long jobId) {
@@ -50,5 +70,12 @@ public class IngestJobQueryService {
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(new InputStreamResource(object));
+    }
+
+    private static String blankToNull(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        return value.trim();
     }
 }
