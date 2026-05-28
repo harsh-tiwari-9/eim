@@ -71,7 +71,7 @@ public class PsmoController {
     }
 
     @GetMapping("/operations/{id}/logs")
-    @PreAuthorize("hasAnyRole('SUPER_ADMIN)")
+    @PreAuthorize("hasAnyRole('SUPER_ADMIN')")
     public ApiResponse<List<OperationLogResponse>> getLogsForOperation(
             @PathVariable("id") Long id
     ) {
