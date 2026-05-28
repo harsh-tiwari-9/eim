@@ -1,5 +1,7 @@
 package com.jio.eim.psmo.service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jio.eim.psmo.dto.PsmoCommandMessage;
 import com.jio.eim.psmo.entity.DevicePending;
 import com.jio.eim.psmo.entity.Operation;
@@ -14,6 +16,8 @@ import com.jio.eim.psmo.signer.PackageBuilder;
 import com.jio.eim.psmo.signer.Signer;
 import com.jio.eim.psmo.signer.Signer.SignatureResult;
 import java.time.Instant;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -35,6 +39,7 @@ public class PackageSigningService {
     private final DevicePendingRepository devicePendingRepository;
     private final PackageBuilder packageBuilder;
     private final Signer signer;
+    private final ObjectMapper objectMapper;
 
     public PackageSigningService(
             OperationRepository operationRepository,
@@ -42,13 +47,15 @@ public class PackageSigningService {
             SignedPackageRepository signedPackageRepository,
             DevicePendingRepository devicePendingRepository,
             PackageBuilder packageBuilder,
-            Signer signer) {
+            Signer signer,
+            ObjectMapper objectMapper) {
         this.operationRepository = operationRepository;
         this.operationLogRepository = operationLogRepository;
         this.signedPackageRepository = signedPackageRepository;
         this.devicePendingRepository = devicePendingRepository;
         this.packageBuilder = packageBuilder;
         this.signer = signer;
+        this.objectMapper = objectMapper;
     }
 
     @Transactional
@@ -85,25 +92,36 @@ public class PackageSigningService {
             operation.setSignedAt(now);
             operationRepository.save(operation);
 
-            writeLog(operation.getId(), "SIGNED", "alg=" + sig.algorithm()
-                    + " bytes=" + finalBytes.length);
+            Map<String, Object> signedDetails = new LinkedHashMap<>();
+            signedDetails.put("alg", sig.algorithm());
+            signedDetails.put("bytes", finalBytes.length);
+            writeLog(operation.getId(), "SIGNED", signedDetails);
 
             log.info("Operation {} signed and queued for EID {}", operation.getId(), operation.getEid());
         } catch (Exception ex) {
             log.error("Failed to sign operation {}", operation.getId(), ex);
             operation.setStatus(STATUS_FAILED);
             operationRepository.save(operation);
-            writeLog(operation.getId(), "FAILED", "sign-failed: " + ex.getMessage());
+            Map<String, Object> failedDetails = new LinkedHashMap<>();
+            failedDetails.put("reason", "sign-failed");
+            failedDetails.put("message", ex.getMessage());
+            writeLog(operation.getId(), "FAILED", failedDetails);
             // do NOT rethrow — we don't want Kafka to retry indefinitely on a bad package
         }
     }
 
-    private void writeLog(Long operationId, String eventType, String details) {
-        OperationLog log = new OperationLog();
-        log.setOperationId(operationId);
-        log.setEventType(eventType);
-        log.setActor(ACTOR);
-        log.setDetails(details == null ? null : "\"" + details.replace("\"", "\\\"") + "\"");
-        operationLogRepository.save(log);
+    private void writeLog(Long operationId, String eventType, Map<String, Object> details) {
+        OperationLog entry = new OperationLog();
+        entry.setOperationId(operationId);
+        entry.setEventType(eventType);
+        entry.setActor(ACTOR);
+        if (details != null && !details.isEmpty()) {
+            try {
+                entry.setDetails(objectMapper.writeValueAsString(details));
+            } catch (JsonProcessingException ex) {
+                log.warn("Failed to serialize log details for op {}", operationId, ex);
+            }
+        }
+        operationLogRepository.save(entry);
     }
 }
