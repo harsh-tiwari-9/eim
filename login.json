@@ -8,3 +8,5 @@ sudo dpkg -i cloudflared-linux-amd64.deb
 nohup cloudflared tunnel --url http://localhost:8080 > ~/eim/logs/tunnel.log 2>&1 &
 
 grep -o 'https://[^ ]*\.trycloudflare\.com' ~/eim/logs/tunnel.log | head -1
+
+https://technician-homeless-terry-readily.trycloudflare.com
