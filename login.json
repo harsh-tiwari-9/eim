@@ -1,3 +1,10 @@
 curl -X POST http://localhost:8080/api/auth/login \
 -H "Content-Type: application/json" \
 -d '{"username":"admin","password":"Admin@123"}'
+
+
+wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+sudo dpkg -i cloudflared-linux-amd64.deb
+nohup cloudflared tunnel --url http://localhost:8080 > ~/eim/logs/tunnel.log 2>&1 &
+
+grep -o 'https://[^ ]*\.trycloudflare\.com' ~/eim/logs/tunnel.log | head -1
