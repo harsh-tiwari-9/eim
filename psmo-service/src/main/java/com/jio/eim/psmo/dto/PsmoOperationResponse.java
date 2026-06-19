@@ -14,6 +14,7 @@ public class PsmoOperationResponse {
     private String targetIccid;
     private String status;
     private String requestedBy;
+    private String params;
     private String resultPayload;
     private Instant createdAt;
     private Instant updatedAt;

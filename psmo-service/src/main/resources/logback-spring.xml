@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+
+    <!-- Spring Boot console defaults: app/console logging stays exactly as before -->
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+    <include resource="org/springframework/boot/logging/logback/console-appender.xml"/>
+
+    <!--
+      SGP.32 ESipa polling audit trail. Each device poll (ES9+/ESipa GetEimPackage)
+      and result submission is recorded as one structured key=value line in a
+      dedicated rolling file, separate from the application log.
+    -->
+    <property name="POLLING_LOG_DIR" value="${EIM_PSMO_POLLING_LOG:-logs}"/>
+
+    <appender name="POLLING_HISTORY_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${POLLING_LOG_DIR}/psmo-polling-history.log</file>
+        <encoder>
+            <pattern>%msg%n</pattern>
+        </encoder>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${POLLING_LOG_DIR}/psmo-polling-history.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+            <maxFileSize>50MB</maxFileSize>
+            <maxHistory>30</maxHistory>
+            <totalSizeCap>2GB</totalSizeCap>
+        </rollingPolicy>
+    </appender>
+
+    <!-- additivity=false keeps poll lines out of the console/app log -->
+    <logger name="POLLING_HISTORY" level="INFO" additivity="false">
+        <appender-ref ref="POLLING_HISTORY_FILE"/>
+    </logger>
+
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+    </root>
+
+</configuration>
