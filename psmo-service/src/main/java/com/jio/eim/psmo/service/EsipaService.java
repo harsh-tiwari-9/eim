@@ -3,6 +3,7 @@ package com.jio.eim.psmo.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jio.eim.psmo.dto.EsipaNotification;
+import com.jio.eim.psmo.esipa.EuiccPackageResultDecoder;
 import com.jio.eim.psmo.entity.DevicePending;
 import com.jio.eim.psmo.entity.Operation;
 import com.jio.eim.psmo.entity.OperationLog;
@@ -36,6 +37,7 @@ public class EsipaService {
     private final SignedPackageRepository signedPackageRepository;
     private final OperationRepository operationRepository;
     private final OperationLogRepository operationLogRepository;
+    private final EuiccPackageResultDecoder resultDecoder;
     private final ObjectMapper objectMapper;
 
     @Transactional
@@ -115,6 +117,54 @@ public class EsipaService {
         writeLog(op.getId(), "NOTIFICATION_RECEIVED");
         writeLog(op.getId(), newStatus);
         log.info("Op {} {} (notification from device {})", op.getId(), newStatus, op.getEid());
+    }
+
+    /**
+     * Applies an eIM Package Result delivered by the device over the spec ESipa interface
+     * ({@code ESipa.ProvideEimPackageResult}). The SGP.32 {@code EuiccPackageResult} carries no
+     * operation id directly, so it is linked back to the {@link Operation} via the
+     * {@code eimTransactionId} the eUICC echoes (which this eIM set to the operationId). For AUDIT
+     * the decoded profile list is stored in the operation's result payload.
+     */
+    @Transactional
+    public void applyEuiccPackageResult(String eid, byte[] euiccPackageResult) {
+        if (euiccPackageResult == null || euiccPackageResult.length == 0) {
+            log.warn("Empty eIM Package Result from device {}", eid);
+            return;
+        }
+
+        EuiccPackageResultDecoder.Decoded decoded = resultDecoder.decode(euiccPackageResult);
+        if (decoded.operationId() == null) {
+            log.warn("eIM Package Result from device {} has no eimTransactionId; cannot map to an "
+                    + "operation. details={}", eid, decoded.details());
+            return;
+        }
+
+        Operation op = operationRepository.findById(decoded.operationId()).orElse(null);
+        if (op == null) {
+            log.warn("eIM Package Result references unknown operation {} (device {})",
+                    decoded.operationId(), eid);
+            return;
+        }
+        if (STATUS_EXECUTED.equals(op.getStatus()) || STATUS_FAILED.equals(op.getStatus())) {
+            log.info("Op {} already terminal ({}), ignoring duplicate result", op.getId(), op.getStatus());
+            return;
+        }
+
+        String newStatus = decoded.success() ? STATUS_EXECUTED : STATUS_FAILED;
+        op.setStatus(newStatus);
+        op.setCompletedAt(Instant.now());
+        try {
+            op.setResultPayload(objectMapper.writeValueAsString(decoded.details()));
+        } catch (JsonProcessingException ex) {
+            throw new IllegalStateException("Failed to serialize eUICC Package Result", ex);
+        }
+        operationRepository.save(op);
+        devicePendingRepository.deleteByOperationId(op.getId());
+
+        writeLog(op.getId(), "RESULT_RECEIVED");
+        writeLog(op.getId(), newStatus);
+        log.info("Op {} {} from eUICC Package Result (device {})", op.getId(), newStatus, eid);
     }
 
     private void writeLog(Long operationId, String eventType) {

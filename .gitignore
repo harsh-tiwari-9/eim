@@ -3,3 +3,8 @@ target/
 *.iml
 .DS_Store
 .env
+# TLS keystores / private keys for the ESipa HTTPS connector — never commit private keys
+**/tls/*.p12
+**/tls/*.jks
+**/tls/*.key
+logs/
