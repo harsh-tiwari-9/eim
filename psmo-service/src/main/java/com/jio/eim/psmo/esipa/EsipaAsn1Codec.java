@@ -1,7 +1,9 @@
 package com.jio.eim.psmo.esipa;
 
 import java.io.IOException;
+import java.util.List;
 import org.bouncycastle.asn1.ASN1Encodable;
+import org.bouncycastle.asn1.ASN1EncodableVector;
 import org.bouncycastle.asn1.ASN1Integer;
 import org.bouncycastle.asn1.ASN1OctetString;
 import org.bouncycastle.asn1.ASN1Primitive;
@@ -35,6 +37,10 @@ public class EsipaAsn1Codec {
     static final int TAG_GET_EIM_PACKAGE = 79;
     /** Context tag of provideEimPackageResult{,Response} (BF50). */
     static final int TAG_PROVIDE_EIM_PACKAGE_RESULT = 80;
+    /** Context tag of eimAcknowledgements (BF53). */
+    private static final int TAG_EIM_ACKNOWLEDGEMENTS = 83;
+    /** Context tag of SequenceNumber ([0] INTEGER). */
+    private static final int TAG_SEQUENCE_NUMBER = 0;
     /** APPLICATION class tag of eidValue (5A). */
     private static final int TAG_EID_VALUE = 26;
     /** eimPackageError value returned when the device has no pending eIM Package. */
@@ -102,10 +108,27 @@ public class EsipaAsn1Codec {
         return encode(new DERTaggedObject(true, TAG_GET_EIM_PACKAGE, inner));
     }
 
-    /** Encodes an empty {@code ProvideEimPackageResultResponse ::= [80] SEQUENCE {}} (no acknowledgements). */
-    public byte[] encodeProvideEimPackageResultResponse() {
+    /**
+     * Encodes {@code ProvideEimPackageResultResponse ::= [80] SEQUENCE { eimAcknowledgements [83]
+     * OPTIONAL }}. Each acknowledged {@code seqNumber} tells the eUICC to delete that stored result
+     * and stop re-delivering it. An empty/null list produces the bare {@code BF50 00} response.
+     *
+     * <pre>
+     * EimAcknowledgements ::= [83] SEQUENCE OF SequenceNumber   -- Tag 'BF53'
+     * SequenceNumber      ::= [0] INTEGER
+     * </pre>
+     */
+    public byte[] encodeProvideEimPackageResultResponse(List<Integer> ackedSeqNumbers) {
+        ASN1EncodableVector responseContent = new ASN1EncodableVector();
+        if (ackedSeqNumbers != null && !ackedSeqNumbers.isEmpty()) {
+            ASN1EncodableVector seqNumbers = new ASN1EncodableVector();
+            for (Integer seqNumber : ackedSeqNumbers) {
+                seqNumbers.add(new DERTaggedObject(false, TAG_SEQUENCE_NUMBER, new ASN1Integer(seqNumber)));
+            }
+            responseContent.add(new DERTaggedObject(false, TAG_EIM_ACKNOWLEDGEMENTS, new DERSequence(seqNumbers)));
+        }
         // IMPLICIT context tag replacing the universal SEQUENCE tag.
-        return encode(new DERTaggedObject(false, TAG_PROVIDE_EIM_PACKAGE_RESULT, new DERSequence()));
+        return encode(new DERTaggedObject(false, TAG_PROVIDE_EIM_PACKAGE_RESULT, new DERSequence(responseContent)));
     }
 
     private String extractEidHex(ASN1Sequence seq) {

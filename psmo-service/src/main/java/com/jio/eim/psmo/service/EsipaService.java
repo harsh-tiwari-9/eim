@@ -126,29 +126,44 @@ public class EsipaService {
      * {@code eimTransactionId} the eUICC echoes (which this eIM set to the operationId). For AUDIT
      * the decoded profile list is stored in the operation's result payload.
      */
+    /**
+     * @return the result {@code seqNumber}(s) to acknowledge back to the eUICC (via
+     *         {@code eimAcknowledgements}) so it deletes the stored result and stops re-delivering
+     *         it on every poll. Empty when there is nothing safe to acknowledge (undecodable, no
+     *         seqNumber, or an unresolved operation).
+     */
     @Transactional
-    public void applyEuiccPackageResult(String eid, byte[] euiccPackageResult) {
+    public List<Integer> applyEuiccPackageResult(String eid, byte[] euiccPackageResult) {
         if (euiccPackageResult == null || euiccPackageResult.length == 0) {
             log.warn("Empty eIM Package Result from device {}", eid);
-            return;
+            return List.of();
         }
 
         EuiccPackageResultDecoder.Decoded decoded = resultDecoder.decode(euiccPackageResult);
+        Integer seqNumber = decoded.sequenceNumber();
+
         if (decoded.operationId() == null) {
             log.warn("eIM Package Result from device {} has no eimTransactionId; cannot map to an "
-                    + "operation. details={}", eid, decoded.details());
-            return;
+                    + "operation (seqNumber={}, not acknowledging). details={}",
+                    eid, seqNumber, decoded.details());
+            return List.of();
         }
 
         Operation op = operationRepository.findById(decoded.operationId()).orElse(null);
         if (op == null) {
-            log.warn("eIM Package Result references unknown operation {} (device {})",
-                    decoded.operationId(), eid);
-            return;
+            log.warn("eIM Package Result references unknown operation {} (device {}, seqNumber={}); "
+                    + "not acknowledging", decoded.operationId(), eid, seqNumber);
+            return List.of();
         }
+
+        // We have the result durably (or already did) — acknowledge its seqNumber so the eUICC
+        // stops re-delivering it. Nothing to ack for results that carry no seqNumber (e.g. errors).
+        List<Integer> acknowledgements = (seqNumber != null) ? List.of(seqNumber) : List.of();
+
         if (STATUS_EXECUTED.equals(op.getStatus()) || STATUS_FAILED.equals(op.getStatus())) {
-            log.info("Op {} already terminal ({}), ignoring duplicate result", op.getId(), op.getStatus());
-            return;
+            log.info("Op {} already terminal ({}); acknowledging duplicate result (seqNumber={})",
+                    op.getId(), op.getStatus(), seqNumber);
+            return acknowledgements;
         }
 
         String newStatus = decoded.success() ? STATUS_EXECUTED : STATUS_FAILED;
@@ -164,7 +179,9 @@ public class EsipaService {
 
         writeLog(op.getId(), "RESULT_RECEIVED");
         writeLog(op.getId(), newStatus);
-        log.info("Op {} {} from eUICC Package Result (device {})", op.getId(), newStatus, eid);
+        log.info("Op {} {} from eUICC Package Result (device {}); acknowledging seqNumber {}",
+                op.getId(), newStatus, eid, seqNumber);
+        return acknowledgements;
     }
 
     private void writeLog(Long operationId, String eventType) {

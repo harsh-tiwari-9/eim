@@ -51,7 +51,12 @@ public class EuiccPackageResultDecoder {
     private static final int TAG_SPN = 17;          // [17] '91'
     private static final int TAG_PROFILE_NAME = 18;  // [18] '92'
 
-    public record Decoded(Long operationId, boolean success, Map<String, Object> details) {}
+    /**
+     * @param sequenceNumber the result's {@code seqNumber} (present for signed results) — echoed
+     *        back as an {@code eimAcknowledgement} so the eUICC deletes it and stops re-delivering.
+     */
+    public record Decoded(Long operationId, boolean success, Integer sequenceNumber,
+                          Map<String, Object> details) {}
 
     public Decoded decode(byte[] eimPackageResult) {
         Map<String, Object> details = new LinkedHashMap<>();
@@ -60,7 +65,7 @@ public class EuiccPackageResultDecoder {
             ASN1TaggedObject euiccPackageResult = locateEuiccPackageResult(top);
             if (euiccPackageResult == null) {
                 details.put("raw", Hex.toHexString(eimPackageResult));
-                return new Decoded(null, false, details);
+                return new Decoded(null, false, null, details);
             }
 
             // [81] CHOICE is EXPLICIT -> the chosen alternative ([0]/[1]/[2]).
@@ -70,13 +75,13 @@ public class EuiccPackageResultDecoder {
                 case BRANCH_ERROR_SIGNED, BRANCH_ERROR_UNSIGNED -> decodeError(branch, details);
                 default -> {
                     details.put("raw", Hex.toHexString(eimPackageResult));
-                    yield new Decoded(null, false, details);
+                    yield new Decoded(null, false, null, details);
                 }
             };
         } catch (Exception ex) {
             details.put("decodeError", ex.getMessage());
             details.put("raw", Hex.toHexString(eimPackageResult));
-            return new Decoded(null, false, details);
+            return new Decoded(null, false, null, details);
         }
     }
 
@@ -85,6 +90,7 @@ public class EuiccPackageResultDecoder {
         ASN1Sequence dataSigned = ASN1Sequence.getInstance(resultSigned.getObjectAt(0));
 
         Long operationId = null;
+        Integer seqNumber = null;
         ASN1Sequence euiccResult = null;
         for (ASN1Encodable element : dataSigned) {
             if (!(element instanceof ASN1TaggedObject tagged)
@@ -95,7 +101,10 @@ public class EuiccPackageResultDecoder {
                 case FIELD_EIM_ID -> details.put("eimId", utf8(tagged));
                 case FIELD_COUNTER -> details.put("counterValue", integer(tagged));
                 case FIELD_TRANSACTION_ID -> operationId = transactionIdToLong(octets(tagged));
-                case FIELD_SEQ_NUMBER -> details.put("seqNumber", integer(tagged));
+                case FIELD_SEQ_NUMBER -> {
+                    seqNumber = integer(tagged);
+                    details.put("seqNumber", seqNumber);
+                }
                 default -> { /* ignore unknown */ }
             }
         }
@@ -109,7 +118,7 @@ public class EuiccPackageResultDecoder {
         if (euiccResult != null) {
             details.put("results", decodeResultList(euiccResult));
         }
-        return new Decoded(operationId, true, details);
+        return new Decoded(operationId, true, seqNumber, details);
     }
 
     private List<Object> decodeResultList(ASN1Sequence euiccResult) {
@@ -194,7 +203,7 @@ public class EuiccPackageResultDecoder {
                 details.put("euiccPackageErrorCode", i.getValue().intValue());
             }
         }
-        return new Decoded(operationId, false, details);
+        return new Decoded(operationId, false, null, details);
     }
 
     private static ASN1TaggedObject locateEuiccPackageResult(ASN1Primitive top) {

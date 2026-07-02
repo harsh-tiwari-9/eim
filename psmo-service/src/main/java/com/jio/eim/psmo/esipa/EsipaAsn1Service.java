@@ -1,6 +1,7 @@
 package com.jio.eim.psmo.esipa;
 
 import com.jio.eim.psmo.service.EsipaService;
+import java.util.List;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -36,8 +37,12 @@ public class EsipaAsn1Service {
                 yield codec.encodeGetEimPackageResponse(pkg.orElse(null));
             }
             case PROVIDE_EIM_PACKAGE_RESULT -> {
-                esipaService.applyEuiccPackageResult(msg.eidHex(), msg.eimPackageResult());
-                yield codec.encodeProvideEimPackageResultResponse();
+                List<Integer> acks = esipaService.applyEuiccPackageResult(msg.eidHex(), msg.eimPackageResult());
+                if (!acks.isEmpty()) {
+                    log.info("ESipa: acknowledging eUICC result seqNumber(s) {} to device {}",
+                            acks, msg.eidHex());
+                }
+                yield codec.encodeProvideEimPackageResultResponse(acks);
             }
         };
     }
