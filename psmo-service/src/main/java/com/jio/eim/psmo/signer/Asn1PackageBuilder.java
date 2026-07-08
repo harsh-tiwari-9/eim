@@ -3,6 +3,7 @@ package com.jio.eim.psmo.signer;
 import com.jio.eim.psmo.dto.PsmoCommandMessage;
 import com.jio.eim.psmo.entity.EimPackageCounter;
 import com.jio.eim.psmo.repository.EimPackageCounterRepository;
+import com.jio.eim.psmo.util.IccidCodec;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.math.BigInteger;
@@ -101,9 +102,30 @@ public class Asn1PackageBuilder implements PackageBuilder {
         return switch (message.type()) {
             // AUDIT -> Psmo.listProfileInfo [45] ProfileInfoListRequest (empty = default tag list), tag 'BF2D'
             case "AUDIT" -> new DERTaggedObject(false, 45, new DERSequence());
+            // SGP.32 §2.11.1 Psmo CHOICE. iccid [APPLICATION 26] bears its own tag, so the module's
+            // AUTOMATIC TAGS does not apply inside these SEQUENCEs — the ICCID stays a bare '5A'
+            // field, matching what the eUICC returns in ProfileInfo and reuses the eidValue pattern.
+            //   enable  [3] SEQUENCE { iccid [APPLICATION 26] Iccid, rollbackFlag NULL OPTIONAL }
+            //   disable [4] SEQUENCE { iccid [APPLICATION 26] Iccid }
+            //   delete  [5] SEQUENCE { iccid [APPLICATION 26] Iccid }
+            // rollbackFlag is omitted on ENABLE (we do not request rollback semantics).
+            case "ENABLE" -> new DERTaggedObject(false, 3, new DERSequence(iccidField(message)));
+            case "DISABLE" -> new DERTaggedObject(false, 4, new DERSequence(iccidField(message)));
+            case "DELETE" -> new DERTaggedObject(false, 5, new DERSequence(iccidField(message)));
             default -> throw new IllegalArgumentException(
                     "Unsupported PSMO type for ASN.1 encoder: " + message.type());
         };
+    }
+
+    /** iccid [APPLICATION 26] Iccid — the target profile, swapped-BCD encoded per E.118 (tag '5A'). */
+    private ASN1Encodable iccidField(PsmoCommandMessage message) {
+        String iccid = message.targetIccid();
+        if (iccid == null || iccid.isBlank()) {
+            throw new IllegalArgumentException(
+                    message.type() + " requires targetIccid (operation " + message.operationId() + ")");
+        }
+        return new DERTaggedObject(false, BERTags.APPLICATION, 26,
+                new DEROctetString(IccidCodec.toBytes(iccid)));
     }
 
     /**

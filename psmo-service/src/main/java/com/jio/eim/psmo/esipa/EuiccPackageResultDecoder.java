@@ -1,5 +1,6 @@
 package com.jio.eim.psmo.esipa;
 
+import com.jio.eim.psmo.util.IccidCodec;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -44,6 +45,13 @@ public class EuiccPackageResultDecoder {
 
     private static final int RESULT_LIST_PROFILE_INFO = 45;
     private static final int PROFILE_INFO_LIST_OK = 0;
+
+    // EuiccResultData CHOICE alternatives for the profile state-management PSMOs (SGP.32 §2.11.1).
+    // Each is an INTEGER result code; 0 == ok, non-zero == the operation failed on the card.
+    private static final int RESULT_ENABLE = 3;   // enableResult  [3] EnableProfileResult
+    private static final int RESULT_DISABLE = 4;  // disableResult [4] DisableProfileResult
+    private static final int RESULT_DELETE = 5;   // deleteResult  [5] DeleteProfileResult
+    private static final int RESULT_CODE_OK = 0;
 
     // ProfileInfo field tags (SGP.22)
     private static final int TAG_ICCID = 26;        // [APPLICATION 26] '5A'
@@ -115,22 +123,81 @@ public class EuiccPackageResultDecoder {
             }
         }
 
+        // A signed result only means the package was validly processed — the individual PSMO may
+        // still have failed on the card (e.g. profileNotInDisabledState). Derive success from the
+        // actual result code(s), not from the mere presence of a signed result.
+        boolean success = true;
         if (euiccResult != null) {
-            details.put("results", decodeResultList(euiccResult));
+            List<Object> results = decodeResultList(euiccResult);
+            details.put("results", results);
+            success = computeSuccess(results);
         }
-        return new Decoded(operationId, true, seqNumber, details);
+        return new Decoded(operationId, success, seqNumber, details);
+    }
+
+    /** All decoded PSMO results must be "ok" for the operation to count as EXECUTED. */
+    private boolean computeSuccess(List<Object> results) {
+        for (Object entry : results) {
+            if (entry instanceof Map<?, ?> map) {
+                Object code = map.get("resultCode");
+                if (code instanceof Integer value && value != RESULT_CODE_OK) {
+                    return false;
+                }
+                if (map.containsKey("profileInfoListError")) {
+                    return false;
+                }
+            }
+        }
+        return true;
     }
 
     private List<Object> decodeResultList(ASN1Sequence euiccResult) {
         List<Object> results = new ArrayList<>();
         for (ASN1Encodable e : euiccResult) {
-            if (e instanceof ASN1TaggedObject rd && rd.getTagNo() == RESULT_LIST_PROFILE_INFO) {
-                results.add(decodeListProfileInfo(rd));
+            if (e instanceof ASN1TaggedObject rd) {
+                switch (rd.getTagNo()) {
+                    case RESULT_LIST_PROFILE_INFO -> results.add(decodeListProfileInfo(rd));
+                    case RESULT_ENABLE -> results.add(profileMgmtResult("enable", rd));
+                    case RESULT_DISABLE -> results.add(profileMgmtResult("disable", rd));
+                    case RESULT_DELETE -> results.add(profileMgmtResult("delete", rd));
+                    default -> results.add(Map.of("raw", hex(e)));
+                }
             } else {
                 results.add(Map.of("raw", hex(e)));
             }
         }
         return results;
+    }
+
+    /** Decodes an enable/disable/delete result INTEGER and names the code per SGP.32 §2.11.1. */
+    private Map<String, Object> profileMgmtResult(String type, ASN1TaggedObject rd) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("type", type);
+        try {
+            int code = integer(rd);
+            out.put("resultCode", code);
+            out.put("result", resultName(type, code));
+        } catch (Exception ex) {
+            out.put("parseError", ex.getMessage());
+            out.put("raw", hex(rd));
+        }
+        return out;
+    }
+
+    private static String resultName(String type, int code) {
+        String name = switch (code) {
+            case 0 -> "ok";
+            case 1 -> "iccidOrAidNotFound";
+            case 2 -> "enable".equals(type) || "delete".equals(type)
+                    ? "profileNotInDisabledState" : "profileNotInEnabledState";
+            case 3 -> "disallowedByPolicy";
+            case 5 -> "catBusy";
+            case 20 -> "rollbackNotAvailable";
+            case 21 -> "returnFallbackProfile";
+            case 127 -> "undefinedError";
+            default -> "unknown";
+        };
+        return name + "(" + code + ")";
     }
 
     private Map<String, Object> decodeListProfileInfo(ASN1TaggedObject listProfileInfoResult) {
@@ -166,7 +233,11 @@ public class EuiccPackageResultDecoder {
                     continue;
                 }
                 if (t.getTagClass() == BERTags.APPLICATION && t.getTagNo() == TAG_ICCID) {
-                    out.put("iccid", Hex.toHexString(octets(t)));
+                    // Emit the human-readable decimal ICCID (what an operator passes as targetIccid);
+                    // keep the on-card swapped-BCD hex too so nothing is lost.
+                    byte[] raw = octets(t);
+                    out.put("iccid", IccidCodec.toDigits(raw));
+                    out.put("iccidRaw", Hex.toHexString(raw));
                 } else if (t.getTagClass() == BERTags.CONTEXT_SPECIFIC) {
                     switch (t.getTagNo()) {
                         case TAG_PROFILE_STATE -> out.put("state",
