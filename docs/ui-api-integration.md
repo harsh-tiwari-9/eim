@@ -200,7 +200,9 @@ Request:
   - `AUDIT` — list on-card profiles; no `targetIccid` needed.
   - `ENABLE` / `DISABLE` / `DELETE` — `targetIccid` **required**, must be the **decimal** ICCID
     (as shown in AUDIT's `iccid` field, **not** `iccidRaw`).
-  - `DOWNLOAD` — not implemented yet.
+  - `DOWNLOAD` — provide `activationCode` (SGP.22 form `1$smdp.example.com$MATCHING-ID`; a leading
+    `LPA:` is stripped). Omit it to tell the eUICC to use its default SM-DP+. Example body:
+    `{ "eid": "...", "type": "DOWNLOAD", "activationCode": "1$smdp.example.com$ABC-123" }`.
 - Response `202 Accepted`: `data` = **PsmoOperationResponse** with `status: "PENDING"`.
 
 ### GET `/api/psmo/operations/{id}` — get operation status/result · `SUPER_ADMIN`, `PLATFORM_ENGINEER`, `READ_ONLY`, `BSS_SYSTEM`
@@ -209,6 +211,13 @@ Request:
 
 **Status lifecycle:** `PENDING` → `SIGNED` → `SENT` (device fetched it) → `EXECUTED` (success) |
 `FAILED` (rejected/errored). `signedAt`/`sentAt`/`completedAt` timestamps mark each transition.
+
+**DOWNLOAD is different** — it's a *trigger*, not a signed operation the eUICC runs locally. Its
+terminal state from the eIM's view is **`SENT`** (the download trigger was delivered; the eUICC then
+downloads directly from the SM-DP+ and reports the install to the SM-DP+, not to us). So for
+DOWNLOAD, `SENT` means "trigger delivered, download in progress on the device" — **confirm the
+profile actually installed by running an `AUDIT`** and checking the new ICCID appears. It does *not*
+reach `EXECUTED`.
 
 **PsmoOperationResponse shape:**
 ```json
@@ -247,4 +256,3 @@ Request:
   endpoint if the UI requires it.
 - **No single-device inventory GET** (`GET /api/inventory/{eid}` is disabled) — use `POST
   /api/inventory/list` with the `eid` filter.
-- **DOWNLOAD** PSMO type is accepted by validation but not implemented.

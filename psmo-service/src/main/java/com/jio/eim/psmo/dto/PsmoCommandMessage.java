@@ -7,6 +7,7 @@ public record PsmoCommandMessage(
         String eid,
         String type,
         String targetIccid,
+        String activationCode,
         String requestedBy,
         Instant ts
 ) {}

@@ -27,6 +27,9 @@ public class PackageSigningService {
     private static final String STATUS_SIGNED = "SIGNED";
     private static final String STATUS_FAILED = "FAILED";
     private static final String PACKAGE_FORMAT_ASN1 = "ASN1";
+    private static final String PACKAGE_FORMAT_DL_TRIGGER = "DL_TRIGGER";
+    private static final String SIGNATURE_ALG_NONE = "none";
+    private static final String TYPE_DOWNLOAD = "DOWNLOAD";
     private static final String ACTOR = "package-signer";
 
     private final OperationRepository operationRepository;
@@ -63,16 +66,32 @@ public class PackageSigningService {
         }
 
         try {
-            BuiltPackage built = packageBuilder.build(message);
-            SignatureResult sig = signer.sign(built.toBeSigned());
-            byte[] finalBytes = packageBuilder.attachSignature(built, sig.signature());
+            byte[] finalBytes;
+            String packageFormat;
+            String signatureAlg;
+            byte[] signatureBytes;
+
+            if (TYPE_DOWNLOAD.equals(message.type())) {
+                // DOWNLOAD is not a signed EuiccPackage — it's an unsigned ProfileDownloadTriggerRequest.
+                finalBytes = packageBuilder.buildProfileDownloadTrigger(message);
+                packageFormat = PACKAGE_FORMAT_DL_TRIGGER;
+                signatureAlg = SIGNATURE_ALG_NONE;
+                signatureBytes = null;
+            } else {
+                BuiltPackage built = packageBuilder.build(message);
+                SignatureResult sig = signer.sign(built.toBeSigned());
+                finalBytes = packageBuilder.attachSignature(built, sig.signature());
+                packageFormat = PACKAGE_FORMAT_ASN1;
+                signatureAlg = sig.algorithm();
+                signatureBytes = sig.signature().length == 0 ? null : sig.signature();
+            }
 
             SignedPackage sp = new SignedPackage();
             sp.setOperationId(operation.getId());
             sp.setPackageBytes(finalBytes);
-            sp.setPackageFormat(PACKAGE_FORMAT_ASN1);
-            sp.setSignatureAlg(sig.algorithm());
-            sp.setSignature(sig.signature().length == 0 ? null : sig.signature());
+            sp.setPackageFormat(packageFormat);
+            sp.setSignatureAlg(signatureAlg);
+            sp.setSignature(signatureBytes);
             signedPackageRepository.save(sp);
 
             DevicePending pending = new DevicePending();
@@ -80,15 +99,18 @@ public class PackageSigningService {
             pending.setOperationId(operation.getId());
             devicePendingRepository.save(pending);
 
+            // Reuse the SIGNED status so the existing ESipa serve path (which keys on SIGNED)
+            // dispatches the download trigger exactly like a signed package.
             Instant now = Instant.now();
             operation.setStatus(STATUS_SIGNED);
             operation.setSignedAt(now);
             operationRepository.save(operation);
 
-            writeLog(operation.getId(), "SIGNED", "alg=" + sig.algorithm()
-                    + " bytes=" + finalBytes.length);
+            writeLog(operation.getId(), "SIGNED", "fmt=" + packageFormat
+                    + " alg=" + signatureAlg + " bytes=" + finalBytes.length);
 
-            log.info("Operation {} signed and queued for EID {}", operation.getId(), operation.getEid());
+            log.info("Operation {} ({}) queued for EID {} [{}]",
+                    operation.getId(), message.type(), operation.getEid(), packageFormat);
         } catch (Exception ex) {
             log.error("Failed to sign operation {}", operation.getId(), ex);
             operation.setStatus(STATUS_FAILED);
