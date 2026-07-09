@@ -12,6 +12,8 @@ import org.bouncycastle.asn1.ASN1TaggedObject;
 import org.bouncycastle.asn1.BERTags;
 import org.bouncycastle.asn1.DERSequence;
 import org.bouncycastle.asn1.DERTaggedObject;
+git stimport org.bouncycastle.util.encoders.Hex;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 /**
@@ -31,6 +33,7 @@ import org.springframework.stereotype.Component;
  * tagged because tagging a CHOICE is always explicit.
  */
 @Component
+@Slf4j
 public class EsipaAsn1Codec {
 
     /** Context tag of getEimPackage{Request,Response} (BF4F). */
@@ -62,7 +65,13 @@ public class EsipaAsn1Codec {
         return switch (top.getTagNo()) {
             case TAG_GET_EIM_PACKAGE -> decodeGetEimPackageRequest(top);
             case TAG_PROVIDE_EIM_PACKAGE_RESULT -> decodeProvideEimPackageResult(top);
-            default -> throw new UnsupportedEsipaFunctionException(top.getTagNo());
+            default -> {
+                // TEMP diagnostic: dump the raw body so an unimplemented ESipa function (e.g. the
+                // profile-download relay handshake, tag [57]) can be decoded offline.
+                log.warn("Unsupported ESipa function tag [{}] ({} bytes) — raw body: {}",
+                        top.getTagNo(), body.length, Hex.toHexString(body));
+                throw new UnsupportedEsipaFunctionException(top.getTagNo());
+            }
         };
     }
 
