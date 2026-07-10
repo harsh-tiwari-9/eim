@@ -62,6 +62,8 @@ public class Es9PlusClient {
                     .POST(HttpRequest.BodyPublishers.ofString(body.toString(), StandardCharsets.UTF_8))
                     .build();
             log.info("ES9+ -> {} {}", function, uri);
+            // TEMP diagnostic: dump the exact request body so a SM-DP+ format rejection can be traced.
+            log.info("ES9+ {} request body: {}", function, body.toString());
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() / 100 != 2) {
                 log.warn("ES9+ {} returned HTTP {} : {}", function, response.statusCode(),
