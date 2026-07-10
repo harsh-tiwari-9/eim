@@ -8,8 +8,10 @@ import org.bouncycastle.asn1.ASN1Integer;
 import org.bouncycastle.asn1.ASN1OctetString;
 import org.bouncycastle.asn1.ASN1Primitive;
 import org.bouncycastle.asn1.ASN1Sequence;
+import org.bouncycastle.asn1.ASN1String;
 import org.bouncycastle.asn1.ASN1TaggedObject;
 import org.bouncycastle.asn1.BERTags;
+import org.bouncycastle.asn1.DEROctetString;
 import org.bouncycastle.asn1.DERSequence;
 import org.bouncycastle.asn1.DERTaggedObject;
 import org.bouncycastle.util.encoders.Hex;
@@ -40,6 +42,16 @@ public class EsipaAsn1Codec {
     static final int TAG_GET_EIM_PACKAGE = 79;
     /** Context tag of provideEimPackageResult{,Response} (BF50). */
     static final int TAG_PROVIDE_EIM_PACKAGE_RESULT = 80;
+    /** Context tag of initiateAuthentication{Request,Response}Esipa (BF39). */
+    public static final int TAG_INITIATE_AUTHENTICATION = 57;
+    /** Context tag of getBoundProfilePackage{Request,Response}Esipa (BF3A). */
+    public static final int TAG_GET_BOUND_PROFILE_PACKAGE = 58;
+    /** Context tag of authenticateClient{Request,Response}Esipa (BF3B). */
+    public static final int TAG_AUTHENTICATE_CLIENT = 59;
+    /** Context tag of handleNotificationEsipa (BF3D). */
+    public static final int TAG_HANDLE_NOTIFICATION = 61;
+    /** EUICCInfo1 ::= [32] SEQUENCE (BF20). */
+    private static final int TAG_EUICC_INFO1 = 32;
     /** Context tag of eimAcknowledgements (BF53). */
     private static final int TAG_EIM_ACKNOWLEDGEMENTS = 83;
     /** Context tag of SequenceNumber ([0] INTEGER). */
@@ -138,6 +150,91 @@ public class EsipaAsn1Codec {
         }
         // IMPLICIT context tag replacing the universal SEQUENCE tag.
         return encode(new DERTaggedObject(false, TAG_PROVIDE_EIM_PACKAGE_RESULT, new DERSequence(responseContent)));
+    }
+
+    /** Top-level context tag of an EsipaMessageFromIpaToEim (used to route relay functions). */
+    public int topTag(byte[] body) {
+        return asContextTagged(parse(body)).getTagNo();
+    }
+
+    /** Decoded {@code InitiateAuthenticationRequestEsipa [57]} (SGP.32 §6.3.2.1). */
+    public record InitiateAuthRequest(byte[] euiccChallenge, String smdpAddress,
+                                      byte[] euiccInfo1Der, Long eimTransactionId) {}
+
+    /**
+     * Decodes {@code InitiateAuthenticationRequestEsipa ::= [57] SEQUENCE { euiccChallenge [1],
+     * smdpAddress [3] OPTIONAL, euiccInfo1 EUICCInfo1 OPTIONAL, eimTransactionId [2] OPTIONAL }}.
+     * {@code euiccInfo1} is returned as its full DER ([32]/BF20) to forward verbatim to ES9+.
+     */
+    public InitiateAuthRequest decodeInitiateAuthRequest(byte[] body) {
+        ASN1TaggedObject top = asContextTagged(parse(body));
+        if (top.getTagNo() != TAG_INITIATE_AUTHENTICATION) {
+            throw new IllegalArgumentException("Not initiateAuthenticationRequestEsipa: [" + top.getTagNo() + "]");
+        }
+        ASN1Sequence seq = ASN1Sequence.getInstance(top, false);
+        byte[] euiccChallenge = null;
+        String smdpAddress = null;
+        byte[] euiccInfo1 = null;
+        Long eimTransactionId = null;
+        for (ASN1Encodable el : seq) {
+            if (!(el instanceof ASN1TaggedObject t) || t.getTagClass() != BERTags.CONTEXT_SPECIFIC) {
+                continue;
+            }
+            switch (t.getTagNo()) {
+                case 1 -> euiccChallenge = octetsOf(t);
+                case 3 -> smdpAddress = ((ASN1String) t.getBaseUniversal(false, BERTags.UTF8_STRING)).getString();
+                case TAG_EUICC_INFO1 -> euiccInfo1 = derOf(t);
+                case 2 -> eimTransactionId = octetsToLong(octetsOf(t));
+                default -> { /* ignore */ }
+            }
+        }
+        return new InitiateAuthRequest(euiccChallenge, smdpAddress, euiccInfo1, eimTransactionId);
+    }
+
+    /**
+     * Encodes the success response {@code EsipaMessageFromEimToIpa -> initiateAuthenticationResponseEsipa
+     * [57] -> initiateAuthenticationOkEsipa}. The five field byte arrays are the DER of each ASN.1
+     * object as returned by ES9+ (base64-decoded by the caller); {@code transactionId} is its raw
+     * octets. {@code [57]} wraps a CHOICE so it is EXPLICIT, and the "ok" alternative is context [0].
+     */
+    public byte[] encodeInitiateAuthOk(byte[] transactionId, byte[] serverSigned1Der,
+            byte[] serverSignature1Der, byte[] euiccCiPKIdDer, byte[] serverCertificateDer) {
+        ASN1EncodableVector ok = new ASN1EncodableVector();
+        if (transactionId != null) {
+            ok.add(new DERTaggedObject(false, 0, new DEROctetString(transactionId)));  // transactionId [0]
+        }
+        ok.add(parse(serverSigned1Der));         // serverSigned1
+        ok.add(parse(serverSignature1Der));      // serverSignature1 [APPLICATION 55] (5F37 TLV)
+        ok.add(parse(euiccCiPKIdDer));           // euiccCiPKIdentifierToBeUsed OCTET STRING (04 TLV)
+        ok.add(parse(serverCertificateDer));     // serverCertificate
+        ASN1Encodable okChoice = new DERTaggedObject(false, 0, new DERSequence(ok)); // ok alt -> [0]
+        return encode(new DERTaggedObject(true, TAG_INITIATE_AUTHENTICATION, okChoice)); // [57] EXPLICIT
+    }
+
+    /** Encodes {@code initiateAuthenticationResponseEsipa} error alternative (context [1] INTEGER). */
+    public byte[] encodeInitiateAuthError(int errorCode) {
+        ASN1Encodable errChoice = new DERTaggedObject(false, 1, new ASN1Integer(errorCode));
+        return encode(new DERTaggedObject(true, TAG_INITIATE_AUTHENTICATION, errChoice));
+    }
+
+    private static byte[] octetsOf(ASN1TaggedObject t) {
+        return ((ASN1OctetString) t.getBaseUniversal(false, BERTags.OCTET_STRING)).getOctets();
+    }
+
+    private static byte[] derOf(ASN1Encodable el) {
+        try {
+            return el.toASN1Primitive().getEncoded("DER");
+        } catch (IOException ex) {
+            throw new IllegalStateException("Failed to DER-encode element", ex);
+        }
+    }
+
+    private static long octetsToLong(byte[] bytes) {
+        long v = 0;
+        for (byte b : bytes) {
+            v = (v << 8) | (b & 0xFF);
+        }
+        return v;
     }
 
     private String extractEidHex(ASN1Sequence seq) {

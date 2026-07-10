@@ -1,5 +1,6 @@
 package com.jio.eim.psmo.esipa;
 
+import com.jio.eim.psmo.service.DownloadRelayService;
 import com.jio.eim.psmo.service.EsipaService;
 import java.util.List;
 import java.util.Optional;
@@ -19,12 +20,21 @@ public class EsipaAsn1Service {
 
     private final EsipaAsn1Codec codec;
     private final EsipaService esipaService;
+    private final DownloadRelayService downloadRelayService;
 
     /**
      * Handles one {@code EsipaMessageFromIpaToEim} and returns the DER-encoded
-     * {@code EsipaMessageFromEimToIpa} response body.
+     * {@code EsipaMessageFromEimToIpa} response body. Indirect profile-download relay functions
+     * (SGP.32 §6.3.2) are routed to {@link DownloadRelayService}; everything else uses the existing
+     * eIM-package retrieval/result path.
      */
     public byte[] handle(byte[] requestBody) {
+        int tag = codec.topTag(requestBody);
+        if (tag == EsipaAsn1Codec.TAG_INITIATE_AUTHENTICATION) {
+            log.info("ESipa relay: InitiateAuthentication");
+            return downloadRelayService.handleInitiateAuth(requestBody);
+        }
+
         EsipaAsn1Codec.IpaMessage msg = codec.decodeFromIpa(requestBody);
         return switch (msg.kind()) {
             case GET_EIM_PACKAGE -> {
