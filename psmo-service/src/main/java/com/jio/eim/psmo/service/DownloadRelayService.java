@@ -29,6 +29,9 @@ import org.springframework.stereotype.Service;
 public class DownloadRelayService {
 
     private static final String STATUS_INITIATED = "INITIATED";
+    private static final String STATUS_AUTHENTICATED = "AUTHENTICATED";
+    private static final String STATUS_BOUND = "BOUND";
+    private static final String STATUS_SESSION_FAILED = "FAILED";
     private static final String OP_STATUS_FAILED = "FAILED";
     private static final int ERR_UNDEFINED = 127;
 
@@ -84,6 +87,88 @@ public class DownloadRelayService {
                 euiccCiPKId, serverCertificate);
     }
 
+    /**
+     * ESipa.AuthenticateClient: forward the eUICC's AuthenticateServer response to the SM-DP+ and
+     * return the SM-DP+'s signed profile metadata / download material to the eUICC.
+     */
+    public byte[] handleAuthenticateClient(byte[] body) {
+        EsipaAsn1Codec.AuthenticateClientRequest req = codec.decodeAuthenticateClientRequest(body);
+        DownloadSession session = lookup(req.transactionIdHex());
+        log.info("Download relay: AuthenticateClient session={} op={}",
+                session.getTransactionId(), session.getOperationId());
+
+        ObjectNode json = objectMapper.createObjectNode();
+        json.put("transactionId", req.transactionIdHex());
+        json.put("authenticateServerResponse", b64(req.authenticateServerResponseDer()));
+
+        JsonNode resp = es9Client.call(session.getSmdpAddress(), "authenticateClient", json);
+        if (!isSuccess(resp)) {
+            log.warn("SM-DP+ authenticateClient failed session={} : {}",
+                    session.getTransactionId(), statusText(resp));
+            markSessionFailed(session);
+            failOperation(session.getOperationId(), "authenticateClient failed: " + statusText(resp));
+            return codec.encodeAuthenticateClientError(ERR_UNDEFINED);
+        }
+
+        byte[] transactionId = Hex.decode(textOr(resp, "transactionId", req.transactionIdHex()));
+        byte[] profileMetadata = optDec(resp, "profileMetadata");
+        byte[] smdpSigned2 = dec(resp, "smdpSigned2");
+        byte[] smdpSignature2 = dec(resp, "smdpSignature2");
+        byte[] smdpCertificate = dec(resp, "smdpCertificate");
+
+        session.setStatus(STATUS_AUTHENTICATED);
+        sessionRepository.save(session);
+
+        return codec.encodeAuthenticateClientOkDP(transactionId, profileMetadata,
+                smdpSigned2, smdpSignature2, smdpCertificate);
+    }
+
+    /**
+     * ESipa.GetBoundProfilePackage: forward the eUICC's PrepareDownload response to the SM-DP+ and
+     * return the Bound Profile Package for the eUICC to install.
+     */
+    public byte[] handleGetBoundProfilePackage(byte[] body) {
+        EsipaAsn1Codec.GetBoundProfilePackageRequest req = codec.decodeGetBoundProfilePackageRequest(body);
+        DownloadSession session = lookup(req.transactionIdHex());
+        log.info("Download relay: GetBoundProfilePackage session={} op={}",
+                session.getTransactionId(), session.getOperationId());
+
+        ObjectNode json = objectMapper.createObjectNode();
+        json.put("transactionId", req.transactionIdHex());
+        json.put("prepareDownloadResponse", b64(req.prepareDownloadResponseDer()));
+
+        JsonNode resp = es9Client.call(session.getSmdpAddress(), "getBoundProfilePackage", json);
+        if (!isSuccess(resp)) {
+            log.warn("SM-DP+ getBoundProfilePackage failed session={} : {}",
+                    session.getTransactionId(), statusText(resp));
+            markSessionFailed(session);
+            failOperation(session.getOperationId(), "getBoundProfilePackage failed: " + statusText(resp));
+            return codec.encodeGetBoundProfilePackageError(ERR_UNDEFINED);
+        }
+
+        byte[] transactionId = Hex.decode(textOr(resp, "transactionId", req.transactionIdHex()));
+        byte[] boundProfilePackage = dec(resp, "boundProfilePackage");
+
+        session.setStatus(STATUS_BOUND);
+        sessionRepository.save(session);
+        log.info("Bound Profile Package delivered to eUICC session={} op={} ({} bytes) — install "
+                + "proceeds on-card; confirm via AUDIT", session.getTransactionId(),
+                session.getOperationId(), boundProfilePackage.length);
+
+        return codec.encodeGetBoundProfilePackageOk(transactionId, boundProfilePackage);
+    }
+
+    private DownloadSession lookup(String transactionIdHex) {
+        String key = transactionIdHex == null ? null : transactionIdHex.toLowerCase();
+        return sessionRepository.findById(key)
+                .orElseThrow(() -> new IllegalStateException("No download session for transactionId " + key));
+    }
+
+    private void markSessionFailed(DownloadSession session) {
+        session.setStatus(STATUS_SESSION_FAILED);
+        sessionRepository.save(session);
+    }
+
     private String resolveEid(Long operationId) {
         if (operationId == null) {
             return "UNKNOWN";
@@ -122,6 +207,20 @@ public class DownloadRelayService {
 
     private static byte[] dec(JsonNode resp, String field) {
         return Base64.getDecoder().decode(text(resp, field));
+    }
+
+    /** Base64-decode an optional field; null if absent/empty. */
+    private static byte[] optDec(JsonNode resp, String field) {
+        JsonNode n = resp.get(field);
+        if (n == null || n.isNull() || n.asText().isEmpty()) {
+            return null;
+        }
+        return Base64.getDecoder().decode(n.asText());
+    }
+
+    private static String textOr(JsonNode resp, String field, String fallback) {
+        JsonNode n = resp.get(field);
+        return (n == null || n.isNull()) ? fallback : n.asText();
     }
 
     private static String b64(byte[] bytes) {

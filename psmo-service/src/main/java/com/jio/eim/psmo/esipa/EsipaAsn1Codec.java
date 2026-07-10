@@ -52,6 +52,10 @@ public class EsipaAsn1Codec {
     public static final int TAG_HANDLE_NOTIFICATION = 61;
     /** EUICCInfo1 ::= [32] SEQUENCE (BF20). */
     private static final int TAG_EUICC_INFO1 = 32;
+    /** authenticateServerResponse [56] (BF38) within AuthenticateClientRequestEsipa. */
+    private static final int TAG_AUTHENTICATE_SERVER_RESPONSE = 56;
+    /** prepareDownloadResponse [33] (BF21) within GetBoundProfilePackageRequestEsipa. */
+    private static final int TAG_PREPARE_DOWNLOAD_RESPONSE = 33;
     /** Context tag of eimAcknowledgements (BF53). */
     private static final int TAG_EIM_ACKNOWLEDGEMENTS = 83;
     /** Context tag of SequenceNumber ([0] INTEGER). */
@@ -215,6 +219,106 @@ public class EsipaAsn1Codec {
     public byte[] encodeInitiateAuthError(int errorCode) {
         ASN1Encodable errChoice = new DERTaggedObject(false, 1, new ASN1Integer(errorCode));
         return encode(new DERTaggedObject(true, TAG_INITIATE_AUTHENTICATION, errChoice));
+    }
+
+    // ---- ESipa.AuthenticateClient (§6.3.2.2) ----
+
+    /** Decoded {@code AuthenticateClientRequestEsipa [59]}. */
+    public record AuthenticateClientRequest(String transactionIdHex, byte[] authenticateServerResponseDer) {}
+
+    /**
+     * Decodes {@code AuthenticateClientRequestEsipa ::= [59] SEQUENCE { transactionId [0],
+     * authenticateServerResponse [56] }}. {@code authenticateServerResponse} is returned as its full
+     * DER ([56]/BF38) to forward verbatim to ES9+.
+     */
+    public AuthenticateClientRequest decodeAuthenticateClientRequest(byte[] body) {
+        ASN1Sequence seq = ASN1Sequence.getInstance(asContextTagged(parse(body)), false);
+        String transactionId = null;
+        byte[] authenticateServerResponse = null;
+        for (ASN1Encodable el : seq) {
+            if (!(el instanceof ASN1TaggedObject t) || t.getTagClass() != BERTags.CONTEXT_SPECIFIC) {
+                continue;
+            }
+            switch (t.getTagNo()) {
+                case 0 -> transactionId = Hex.toHexString(octetsOf(t));
+                case TAG_AUTHENTICATE_SERVER_RESPONSE -> authenticateServerResponse = derOf(t);
+                default -> { /* ignore */ }
+            }
+        }
+        return new AuthenticateClientRequest(transactionId, authenticateServerResponse);
+    }
+
+    /**
+     * Encodes {@code authenticateClientResponseEsipa [59] -> authenticateClientOkDPEsipa} (the SM-DP+
+     * download case). {@code [59]} wraps a CHOICE (EXPLICIT); the OkDP alternative is context [0].
+     */
+    public byte[] encodeAuthenticateClientOkDP(byte[] transactionId, byte[] profileMetadataDer,
+            byte[] smdpSigned2Der, byte[] smdpSignature2Der, byte[] smdpCertificateDer) {
+        ASN1EncodableVector ok = new ASN1EncodableVector();
+        if (transactionId != null) {
+            ok.add(new DERTaggedObject(false, 0, new DEROctetString(transactionId)));  // transactionId [0]
+        }
+        if (profileMetadataDer != null) {
+            ok.add(parse(profileMetadataDer));   // profileMetaData [37] StoreMetadataRequest (BF25 TLV)
+        }
+        ok.add(parse(smdpSigned2Der));           // smdpSigned2
+        ok.add(parse(smdpSignature2Der));        // smdpSignature2 [APPLICATION 55] (5F37 TLV)
+        ok.add(parse(smdpCertificateDer));       // smdpCertificate
+        ASN1Encodable okDp = new DERTaggedObject(false, 0, new DERSequence(ok)); // OkDP alt -> [0]
+        return encode(new DERTaggedObject(true, TAG_AUTHENTICATE_CLIENT, okDp));
+    }
+
+    /** Encodes {@code authenticateClientResponseEsipa} error alternative (context [2] INTEGER). */
+    public byte[] encodeAuthenticateClientError(int errorCode) {
+        ASN1Encodable errChoice = new DERTaggedObject(false, 2, new ASN1Integer(errorCode));
+        return encode(new DERTaggedObject(true, TAG_AUTHENTICATE_CLIENT, errChoice));
+    }
+
+    // ---- ESipa.GetBoundProfilePackage (§6.3.2.3) ----
+
+    /** Decoded {@code GetBoundProfilePackageRequestEsipa [58]}. */
+    public record GetBoundProfilePackageRequest(String transactionIdHex, byte[] prepareDownloadResponseDer) {}
+
+    /**
+     * Decodes {@code GetBoundProfilePackageRequestEsipa ::= [58] SEQUENCE { transactionId [0],
+     * prepareDownloadResponse [33] }}. {@code prepareDownloadResponse} is returned as its full DER
+     * ([33]/BF21) to forward verbatim to ES9+.
+     */
+    public GetBoundProfilePackageRequest decodeGetBoundProfilePackageRequest(byte[] body) {
+        ASN1Sequence seq = ASN1Sequence.getInstance(asContextTagged(parse(body)), false);
+        String transactionId = null;
+        byte[] prepareDownloadResponse = null;
+        for (ASN1Encodable el : seq) {
+            if (!(el instanceof ASN1TaggedObject t) || t.getTagClass() != BERTags.CONTEXT_SPECIFIC) {
+                continue;
+            }
+            switch (t.getTagNo()) {
+                case 0 -> transactionId = Hex.toHexString(octetsOf(t));
+                case TAG_PREPARE_DOWNLOAD_RESPONSE -> prepareDownloadResponse = derOf(t);
+                default -> { /* ignore */ }
+            }
+        }
+        return new GetBoundProfilePackageRequest(transactionId, prepareDownloadResponse);
+    }
+
+    /**
+     * Encodes {@code getBoundProfilePackageResponseEsipa [58] -> getBoundProfilePackageOkEsipa}
+     * carrying the {@code boundProfilePackage [54]} (BF36). "ok" alternative is context [0].
+     */
+    public byte[] encodeGetBoundProfilePackageOk(byte[] transactionId, byte[] boundProfilePackageDer) {
+        ASN1EncodableVector ok = new ASN1EncodableVector();
+        if (transactionId != null) {
+            ok.add(new DERTaggedObject(false, 0, new DEROctetString(transactionId)));  // transactionId [0]
+        }
+        ok.add(parse(boundProfilePackageDer));   // boundProfilePackage [54] (BF36 TLV)
+        ASN1Encodable okChoice = new DERTaggedObject(false, 0, new DERSequence(ok)); // ok alt -> [0]
+        return encode(new DERTaggedObject(true, TAG_GET_BOUND_PROFILE_PACKAGE, okChoice));
+    }
+
+    /** Encodes {@code getBoundProfilePackageResponseEsipa} error alternative (context [1] INTEGER). */
+    public byte[] encodeGetBoundProfilePackageError(int errorCode) {
+        ASN1Encodable errChoice = new DERTaggedObject(false, 1, new ASN1Integer(errorCode));
+        return encode(new DERTaggedObject(true, TAG_GET_BOUND_PROFILE_PACKAGE, errChoice));
     }
 
     private static byte[] octetsOf(ASN1TaggedObject t) {

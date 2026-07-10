@@ -30,9 +30,20 @@ public class EsipaAsn1Service {
      */
     public byte[] handle(byte[] requestBody) {
         int tag = codec.topTag(requestBody);
-        if (tag == EsipaAsn1Codec.TAG_INITIATE_AUTHENTICATION) {
-            log.info("ESipa relay: InitiateAuthentication");
-            return downloadRelayService.handleInitiateAuth(requestBody);
+        switch (tag) {
+            case EsipaAsn1Codec.TAG_INITIATE_AUTHENTICATION -> {
+                log.info("ESipa relay: InitiateAuthentication");
+                return downloadRelayService.handleInitiateAuth(requestBody);
+            }
+            case EsipaAsn1Codec.TAG_AUTHENTICATE_CLIENT -> {
+                log.info("ESipa relay: AuthenticateClient");
+                return downloadRelayService.handleAuthenticateClient(requestBody);
+            }
+            case EsipaAsn1Codec.TAG_GET_BOUND_PROFILE_PACKAGE -> {
+                log.info("ESipa relay: GetBoundProfilePackage");
+                return downloadRelayService.handleGetBoundProfilePackage(requestBody);
+            }
+            default -> { /* fall through to the eIM-package path below */ }
         }
 
         EsipaAsn1Codec.IpaMessage msg = codec.decodeFromIpa(requestBody);
