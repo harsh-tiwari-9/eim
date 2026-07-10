@@ -12,7 +12,7 @@ import org.bouncycastle.asn1.ASN1TaggedObject;
 import org.bouncycastle.asn1.BERTags;
 import org.bouncycastle.asn1.DERSequence;
 import org.bouncycastle.asn1.DERTaggedObject;
-git stimport org.bouncycastle.util.encoders.Hex;
+import org.bouncycastle.util.encoders.Hex;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
