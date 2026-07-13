@@ -321,6 +321,59 @@ public class EsipaAsn1Codec {
         return encode(new DERTaggedObject(true, TAG_GET_BOUND_PROFILE_PACKAGE, errChoice));
     }
 
+    // ---- ESipa.HandleNotification (§6.3.2.4) ----
+
+    /** ProfileInstallationResult ::= [55] (BF37). */
+    private static final int TAG_PROFILE_INSTALLATION_RESULT = 55;
+    /** profileInstallationResultData [39] (BF27) within ProfileInstallationResult. */
+    private static final int TAG_PROFILE_INSTALLATION_RESULT_DATA = 39;
+
+    /** Decoded {@code HandleNotificationEsipa [61]} pending-notification. */
+    public record HandleNotification(byte[] pendingNotificationDer, String transactionIdHex) {}
+
+    /**
+     * Decodes {@code HandleNotificationEsipa ::= [61] CHOICE { pendingNotification [0]
+     * PendingNotification, provideEimPackageResult [80] }}. Returns the {@code PendingNotification}
+     * DER (e.g. the {@code profileInstallationResult [55]}) to forward to ES9+ HandleNotification,
+     * plus the transactionId dug out of the ProfileInstallationResult for session correlation.
+     */
+    public HandleNotification decodeHandleNotification(byte[] body) {
+        ASN1TaggedObject top = asContextTagged(parse(body));           // [61] CHOICE (EXPLICIT)
+        ASN1TaggedObject member = (ASN1TaggedObject) top.getExplicitBaseObject();
+        if (member.getTagNo() != 0) {
+            // provideEimPackageResult [80] or other — forward as-is, no transactionId dig.
+            return new HandleNotification(derOf(member.getExplicitBaseObject()), null);
+        }
+        // pendingNotification [0] EXPLICIT wraps the PendingNotification CHOICE alternative.
+        ASN1Primitive pendingNotification = member.getExplicitBaseObject().toASN1Primitive();
+        return new HandleNotification(derOf(pendingNotification), findTransactionId(pendingNotification));
+    }
+
+    private static String findTransactionId(ASN1Primitive pendingNotification) {
+        try {
+            if (!(pendingNotification instanceof ASN1TaggedObject pir)
+                    || pir.getTagNo() != TAG_PROFILE_INSTALLATION_RESULT) {
+                return null;  // not a ProfileInstallationResult (e.g. other notification type)
+            }
+            ASN1Sequence pirSeq = ASN1Sequence.getInstance(pir.getBaseUniversal(false, BERTags.SEQUENCE));
+            for (ASN1Encodable e : pirSeq) {
+                if (e instanceof ASN1TaggedObject data
+                        && data.getTagNo() == TAG_PROFILE_INSTALLATION_RESULT_DATA) {
+                    ASN1Sequence dataSeq = ASN1Sequence.getInstance(data.getBaseUniversal(false, BERTags.SEQUENCE));
+                    for (ASN1Encodable d : dataSeq) {
+                        if (d instanceof ASN1TaggedObject t
+                                && t.getTagClass() == BERTags.CONTEXT_SPECIFIC && t.getTagNo() == 0) {
+                            return Hex.toHexString(octetsOf(t));  // transactionId [0]
+                        }
+                    }
+                }
+            }
+        } catch (Exception ignore) {
+            // best-effort correlation only
+        }
+        return null;
+    }
+
     private static byte[] octetsOf(ASN1TaggedObject t) {
         return ((ASN1OctetString) t.getBaseUniversal(false, BERTags.OCTET_STRING)).getOctets();
     }

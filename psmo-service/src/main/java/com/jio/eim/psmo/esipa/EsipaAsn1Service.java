@@ -43,6 +43,10 @@ public class EsipaAsn1Service {
                 log.info("ESipa relay: GetBoundProfilePackage");
                 return downloadRelayService.handleGetBoundProfilePackage(requestBody);
             }
+            case EsipaAsn1Codec.TAG_HANDLE_NOTIFICATION -> {
+                log.info("ESipa relay: HandleNotification");
+                return downloadRelayService.handleNotification(requestBody);
+            }
             default -> { /* fall through to the eIM-package path below */ }
         }
 

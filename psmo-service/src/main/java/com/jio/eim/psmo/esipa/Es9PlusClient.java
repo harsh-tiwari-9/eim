@@ -73,6 +73,10 @@ public class Es9PlusClient {
             }
             // TEMP diagnostic: response head (shows transactionId case + fields).
             log.info("ES9+ {} response head: {}", function, truncate(response.body()));
+            // handleNotification returns 204/empty — treat a blank body as an empty object.
+            if (response.body() == null || response.body().isBlank()) {
+                return objectMapper.createObjectNode();
+            }
             return objectMapper.readTree(response.body());
         } catch (ResponseStatusException ex) {
             throw ex;

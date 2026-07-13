@@ -31,9 +31,12 @@ public class DownloadRelayService {
     private static final String STATUS_INITIATED = "INITIATED";
     private static final String STATUS_AUTHENTICATED = "AUTHENTICATED";
     private static final String STATUS_BOUND = "BOUND";
+    private static final String STATUS_COMPLETED = "COMPLETED";
     private static final String STATUS_SESSION_FAILED = "FAILED";
+    private static final String OP_STATUS_EXECUTED = "EXECUTED";
     private static final String OP_STATUS_FAILED = "FAILED";
     private static final int ERR_UNDEFINED = 127;
+    private static final byte[] EMPTY_ACK = new byte[0];
 
     private final EsipaAsn1Codec codec;
     private final Es9PlusClient es9Client;
@@ -159,6 +162,60 @@ public class DownloadRelayService {
                 session.getOperationId(), boundProfilePackage.length);
 
         return codec.encodeGetBoundProfilePackageOk(transactionId, boundProfilePackage);
+    }
+
+    /**
+     * ESipa.HandleNotification: forward the eUICC's install-result notification to the SM-DP+ so it
+     * finalises the download order, mark the operation EXECUTED, and return an empty ack so the
+     * eUICC stops re-sending the notification.
+     */
+    public byte[] handleNotification(byte[] body) {
+        EsipaAsn1Codec.HandleNotification n = codec.decodeHandleNotification(body);
+        DownloadSession session = (n.transactionIdHex() == null) ? null
+                : sessionRepository.findByTransactionIdIgnoreCase(n.transactionIdHex()).orElse(null);
+        log.info("Download relay: HandleNotification txid={} session={} op={}",
+                n.transactionIdHex(), session != null ? session.getTransactionId() : null,
+                session != null ? session.getOperationId() : null);
+
+        if (session == null) {
+            // Notification for an unknown/expired session — can't determine the SM-DP+ to forward to.
+            log.warn("HandleNotification: no session for txid {} — acking without relay",
+                    n.transactionIdHex());
+            return EMPTY_ACK;
+        }
+
+        ObjectNode json = objectMapper.createObjectNode();
+        json.put("pendingNotification", b64(n.pendingNotificationDer()));
+        try {
+            es9Client.call(session.getSmdpAddress(), "handleNotification", json);
+            log.info("Forwarded install notification to SM-DP+ session={} op={}",
+                    session.getTransactionId(), session.getOperationId());
+        } catch (Exception ex) {
+            // The profile is already installed on-card; a notification-relay failure is non-fatal.
+            log.warn("HandleNotification relay to SM-DP+ failed session={} : {} — acking anyway",
+                    session.getTransactionId(), ex.getMessage());
+        }
+
+        session.setStatus(STATUS_COMPLETED);
+        sessionRepository.save(session);
+        markOperationExecuted(session.getOperationId());
+        return EMPTY_ACK;
+    }
+
+    private void markOperationExecuted(Long operationId) {
+        if (operationId == null) {
+            return;
+        }
+        operationRepository.findById(operationId).ifPresent(op -> {
+            if (OP_STATUS_EXECUTED.equals(op.getStatus()) || OP_STATUS_FAILED.equals(op.getStatus())) {
+                return;
+            }
+            op.setStatus(OP_STATUS_EXECUTED);
+            op.setCompletedAt(Instant.now());
+            op.setResultPayload("\"Profile downloaded and installed\"");
+            operationRepository.save(op);
+            log.info("Operation {} EXECUTED (profile download complete)", operationId);
+        });
     }
 
     private DownloadSession lookup(String transactionIdHex) {
