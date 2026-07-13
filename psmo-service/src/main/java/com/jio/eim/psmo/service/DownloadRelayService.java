@@ -74,7 +74,10 @@ public class DownloadRelayService {
         byte[] serverCertificate = dec(resp, "serverCertificate");
 
         DownloadSession session = new DownloadSession();
-        session.setTransactionId(transactionIdHex.toLowerCase());
+        // Keep the SM-DP+'s exact transactionId string — it must be echoed verbatim on the
+        // follow-up ES9+ calls (some SM-DP+ match it case-sensitively). eUICC-echo lookups are
+        // case-insensitive since the eUICC only round-trips the bytes.
+        session.setTransactionId(transactionIdHex);
         session.setEid(eid);
         session.setSmdpAddress(req.smdpAddress());
         session.setOperationId(operationId);
@@ -98,7 +101,7 @@ public class DownloadRelayService {
                 session.getTransactionId(), session.getOperationId());
 
         ObjectNode json = objectMapper.createObjectNode();
-        json.put("transactionId", req.transactionIdHex());
+        json.put("transactionId", session.getTransactionId());  // SM-DP+'s exact string
         json.put("authenticateServerResponse", b64(req.authenticateServerResponseDer()));
 
         JsonNode resp = es9Client.call(session.getSmdpAddress(), "authenticateClient", json);
@@ -134,7 +137,7 @@ public class DownloadRelayService {
                 session.getTransactionId(), session.getOperationId());
 
         ObjectNode json = objectMapper.createObjectNode();
-        json.put("transactionId", req.transactionIdHex());
+        json.put("transactionId", session.getTransactionId());  // SM-DP+'s exact string
         json.put("prepareDownloadResponse", b64(req.prepareDownloadResponseDer()));
 
         JsonNode resp = es9Client.call(session.getSmdpAddress(), "getBoundProfilePackage", json);
@@ -159,9 +162,9 @@ public class DownloadRelayService {
     }
 
     private DownloadSession lookup(String transactionIdHex) {
-        String key = transactionIdHex == null ? null : transactionIdHex.toLowerCase();
-        return sessionRepository.findById(key)
-                .orElseThrow(() -> new IllegalStateException("No download session for transactionId " + key));
+        return sessionRepository.findByTransactionIdIgnoreCase(transactionIdHex)
+                .orElseThrow(() -> new IllegalStateException(
+                        "No download session for transactionId " + transactionIdHex));
     }
 
     private void markSessionFailed(DownloadSession session) {

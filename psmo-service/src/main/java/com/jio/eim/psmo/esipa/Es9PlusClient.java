@@ -71,6 +71,8 @@ public class Es9PlusClient {
                 throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,
                         "SM-DP+ " + function + " HTTP " + response.statusCode());
             }
+            // TEMP diagnostic: response head (shows transactionId case + fields).
+            log.info("ES9+ {} response head: {}", function, truncate(response.body()));
             return objectMapper.readTree(response.body());
         } catch (ResponseStatusException ex) {
             throw ex;
