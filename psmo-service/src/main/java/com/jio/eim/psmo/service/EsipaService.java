@@ -3,6 +3,7 @@ package com.jio.eim.psmo.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jio.eim.psmo.dto.EsipaNotification;
+import com.jio.eim.psmo.esipa.EuiccPackageResultDecoder;
 import com.jio.eim.psmo.entity.DevicePending;
 import com.jio.eim.psmo.entity.Operation;
 import com.jio.eim.psmo.entity.OperationLog;
@@ -30,12 +31,14 @@ public class EsipaService {
     private static final String STATUS_SENT = "SENT";
     private static final String STATUS_EXECUTED = "EXECUTED";
     private static final String STATUS_FAILED = "FAILED";
+    private static final String TYPE_DOWNLOAD = "DOWNLOAD";
     private static final String ACTOR = "esipa-service";
 
     private final DevicePendingRepository devicePendingRepository;
     private final SignedPackageRepository signedPackageRepository;
     private final OperationRepository operationRepository;
     private final OperationLogRepository operationLogRepository;
+    private final EuiccPackageResultDecoder resultDecoder;
     private final ObjectMapper objectMapper;
 
     @Transactional
@@ -70,6 +73,16 @@ public class EsipaService {
             operationRepository.save(op);
             writeLog(op.getId(), "DISPATCHED");
             log.info("Dispatched op {} to device {}", op.getId(), eid);
+
+            // A DOWNLOAD trigger produces no eIM-visible result in direct mode (the eUICC reports
+            // the install to the SM-DP+, not to us), so dequeue it on first delivery to avoid
+            // re-triggering the download on every subsequent poll. Confirm the install via AUDIT.
+            if (TYPE_DOWNLOAD.equals(op.getType())) {
+                devicePendingRepository.deleteByOperationId(op.getId());
+                writeLog(op.getId(), "DOWNLOAD_TRIGGER_DELIVERED");
+                log.info("Delivered download trigger for op {} to device {} (dequeued, one-shot)",
+                        op.getId(), eid);
+            }
         } else {
             log.debug("Re-serving op {} (status={}) to device {}", op.getId(), op.getStatus(), eid);
         }
@@ -115,6 +128,71 @@ public class EsipaService {
         writeLog(op.getId(), "NOTIFICATION_RECEIVED");
         writeLog(op.getId(), newStatus);
         log.info("Op {} {} (notification from device {})", op.getId(), newStatus, op.getEid());
+    }
+
+    /**
+     * Applies an eIM Package Result delivered by the device over the spec ESipa interface
+     * ({@code ESipa.ProvideEimPackageResult}). The SGP.32 {@code EuiccPackageResult} carries no
+     * operation id directly, so it is linked back to the {@link Operation} via the
+     * {@code eimTransactionId} the eUICC echoes (which this eIM set to the operationId). For AUDIT
+     * the decoded profile list is stored in the operation's result payload.
+     */
+    /**
+     * @return the result {@code seqNumber}(s) to acknowledge back to the eUICC (via
+     *         {@code eimAcknowledgements}) so it deletes the stored result and stops re-delivering
+     *         it on every poll. Empty when there is nothing safe to acknowledge (undecodable, no
+     *         seqNumber, or an unresolved operation).
+     */
+    @Transactional
+    public List<Integer> applyEuiccPackageResult(String eid, byte[] euiccPackageResult) {
+        if (euiccPackageResult == null || euiccPackageResult.length == 0) {
+            log.warn("Empty eIM Package Result from device {}", eid);
+            return List.of();
+        }
+
+        EuiccPackageResultDecoder.Decoded decoded = resultDecoder.decode(euiccPackageResult);
+        Integer seqNumber = decoded.sequenceNumber();
+
+        if (decoded.operationId() == null) {
+            log.warn("eIM Package Result from device {} has no eimTransactionId; cannot map to an "
+                    + "operation (seqNumber={}, not acknowledging). details={}",
+                    eid, seqNumber, decoded.details());
+            return List.of();
+        }
+
+        Operation op = operationRepository.findById(decoded.operationId()).orElse(null);
+        if (op == null) {
+            log.warn("eIM Package Result references unknown operation {} (device {}, seqNumber={}); "
+                    + "not acknowledging", decoded.operationId(), eid, seqNumber);
+            return List.of();
+        }
+
+        // We have the result durably (or already did) — acknowledge its seqNumber so the eUICC
+        // stops re-delivering it. Nothing to ack for results that carry no seqNumber (e.g. errors).
+        List<Integer> acknowledgements = (seqNumber != null) ? List.of(seqNumber) : List.of();
+
+        if (STATUS_EXECUTED.equals(op.getStatus()) || STATUS_FAILED.equals(op.getStatus())) {
+            log.info("Op {} already terminal ({}); acknowledging duplicate result (seqNumber={})",
+                    op.getId(), op.getStatus(), seqNumber);
+            return acknowledgements;
+        }
+
+        String newStatus = decoded.success() ? STATUS_EXECUTED : STATUS_FAILED;
+        op.setStatus(newStatus);
+        op.setCompletedAt(Instant.now());
+        try {
+            op.setResultPayload(objectMapper.writeValueAsString(decoded.details()));
+        } catch (JsonProcessingException ex) {
+            throw new IllegalStateException("Failed to serialize eUICC Package Result", ex);
+        }
+        operationRepository.save(op);
+        devicePendingRepository.deleteByOperationId(op.getId());
+
+        writeLog(op.getId(), "RESULT_RECEIVED");
+        writeLog(op.getId(), newStatus);
+        log.info("Op {} {} from eUICC Package Result (device {}); acknowledging seqNumber {}",
+                op.getId(), newStatus, eid, seqNumber);
+        return acknowledgements;
     }
 
     private void writeLog(Long operationId, String eventType) {
