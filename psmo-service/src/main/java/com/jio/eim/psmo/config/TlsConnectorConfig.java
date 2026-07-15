@@ -1,5 +1,6 @@
 package com.jio.eim.psmo.config;
 
+import com.jio.eim.psmo.filter.EsipaPortIsolationFilter;
 import org.apache.catalina.connector.Connector;
 import org.apache.coyote.http11.Http11NioProtocol;
 import org.apache.tomcat.util.net.SSLHostConfig;
@@ -9,8 +10,10 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.web.embedded.tomcat.TomcatServletWebServerFactory;
 import org.springframework.boot.web.server.WebServerFactoryCustomizer;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.Ordered;
 
 /**
  * Adds a dedicated HTTPS connector for device-facing ESipa traffic (SGP.32 §3.1.2.1), in addition
@@ -28,6 +31,21 @@ public class TlsConnectorConfig {
     @ConditionalOnProperty(prefix = "eim.esipa.tls", name = "enabled", havingValue = "true")
     WebServerFactoryCustomizer<TomcatServletWebServerFactory> esipaHttpsConnector(EsipaTlsProperties props) {
         return factory -> factory.addAdditionalTomcatConnectors(buildHttpsConnector(props));
+    }
+
+    /**
+     * When the public ESipa port is active, keep the admin API ({@code /api/**}) off it — only the
+     * device-facing paths are served there. Admin traffic must come via the api-gateway (internal
+     * HTTP port), which enforces JWT. Runs before Spring Security so blocked calls never touch auth.
+     */
+    @Bean
+    @ConditionalOnProperty(prefix = "eim.esipa.tls", name = "enabled", havingValue = "true")
+    FilterRegistrationBean<EsipaPortIsolationFilter> esipaPortIsolationFilter(EsipaTlsProperties props) {
+        FilterRegistrationBean<EsipaPortIsolationFilter> registration =
+                new FilterRegistrationBean<>(new EsipaPortIsolationFilter(props.getPort()));
+        registration.addUrlPatterns("/*");
+        registration.setOrder(Ordered.HIGHEST_PRECEDENCE);
+        return registration;
     }
 
     private Connector buildHttpsConnector(EsipaTlsProperties props) {

@@ -31,6 +31,7 @@ public class EsipaService {
     private static final String STATUS_SENT = "SENT";
     private static final String STATUS_EXECUTED = "EXECUTED";
     private static final String STATUS_FAILED = "FAILED";
+    private static final String TYPE_DOWNLOAD = "DOWNLOAD";
     private static final String ACTOR = "esipa-service";
 
     private final DevicePendingRepository devicePendingRepository;
@@ -72,6 +73,16 @@ public class EsipaService {
             operationRepository.save(op);
             writeLog(op.getId(), "DISPATCHED");
             log.info("Dispatched op {} to device {}", op.getId(), eid);
+
+            // A DOWNLOAD trigger produces no eIM-visible result in direct mode (the eUICC reports
+            // the install to the SM-DP+, not to us), so dequeue it on first delivery to avoid
+            // re-triggering the download on every subsequent poll. Confirm the install via AUDIT.
+            if (TYPE_DOWNLOAD.equals(op.getType())) {
+                devicePendingRepository.deleteByOperationId(op.getId());
+                writeLog(op.getId(), "DOWNLOAD_TRIGGER_DELIVERED");
+                log.info("Delivered download trigger for op {} to device {} (dequeued, one-shot)",
+                        op.getId(), eid);
+            }
         } else {
             log.debug("Re-serving op {} (status={}) to device {}", op.getId(), op.getStatus(), eid);
         }

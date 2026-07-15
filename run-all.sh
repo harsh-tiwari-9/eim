@@ -7,6 +7,11 @@ set -e
 cd "$(dirname "$0")"
 mkdir -p logs
 
+# Load eim2 HTTPS + signing config (exported to the child java processes)                                                                                                                                
+if [ -f eim2.env ]; then
+	set -a; source eim2.env; set +a
+fi
+
 start () {
   local name=$1
   local profile=$2          # optional Spring profile
@@ -26,7 +31,7 @@ start () {
 # Backend services first, gateway last
 start user-service
 start inventory-service
-start psmo-service lab        # <-- lab profile here
+start psmo-service        # <-- lab profile here
 sleep 5
 start api-gateway
 

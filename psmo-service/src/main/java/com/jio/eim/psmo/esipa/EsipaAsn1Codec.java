@@ -8,10 +8,14 @@ import org.bouncycastle.asn1.ASN1Integer;
 import org.bouncycastle.asn1.ASN1OctetString;
 import org.bouncycastle.asn1.ASN1Primitive;
 import org.bouncycastle.asn1.ASN1Sequence;
+import org.bouncycastle.asn1.ASN1String;
 import org.bouncycastle.asn1.ASN1TaggedObject;
 import org.bouncycastle.asn1.BERTags;
+import org.bouncycastle.asn1.DEROctetString;
 import org.bouncycastle.asn1.DERSequence;
 import org.bouncycastle.asn1.DERTaggedObject;
+import org.bouncycastle.util.encoders.Hex;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 /**
@@ -31,12 +35,27 @@ import org.springframework.stereotype.Component;
  * tagged because tagging a CHOICE is always explicit.
  */
 @Component
+@Slf4j
 public class EsipaAsn1Codec {
 
     /** Context tag of getEimPackage{Request,Response} (BF4F). */
     static final int TAG_GET_EIM_PACKAGE = 79;
     /** Context tag of provideEimPackageResult{,Response} (BF50). */
     static final int TAG_PROVIDE_EIM_PACKAGE_RESULT = 80;
+    /** Context tag of initiateAuthentication{Request,Response}Esipa (BF39). */
+    public static final int TAG_INITIATE_AUTHENTICATION = 57;
+    /** Context tag of getBoundProfilePackage{Request,Response}Esipa (BF3A). */
+    public static final int TAG_GET_BOUND_PROFILE_PACKAGE = 58;
+    /** Context tag of authenticateClient{Request,Response}Esipa (BF3B). */
+    public static final int TAG_AUTHENTICATE_CLIENT = 59;
+    /** Context tag of handleNotificationEsipa (BF3D). */
+    public static final int TAG_HANDLE_NOTIFICATION = 61;
+    /** EUICCInfo1 ::= [32] SEQUENCE (BF20). */
+    private static final int TAG_EUICC_INFO1 = 32;
+    /** authenticateServerResponse [56] (BF38) within AuthenticateClientRequestEsipa. */
+    private static final int TAG_AUTHENTICATE_SERVER_RESPONSE = 56;
+    /** prepareDownloadResponse [33] (BF21) within GetBoundProfilePackageRequestEsipa. */
+    private static final int TAG_PREPARE_DOWNLOAD_RESPONSE = 33;
     /** Context tag of eimAcknowledgements (BF53). */
     private static final int TAG_EIM_ACKNOWLEDGEMENTS = 83;
     /** Context tag of SequenceNumber ([0] INTEGER). */
@@ -62,7 +81,13 @@ public class EsipaAsn1Codec {
         return switch (top.getTagNo()) {
             case TAG_GET_EIM_PACKAGE -> decodeGetEimPackageRequest(top);
             case TAG_PROVIDE_EIM_PACKAGE_RESULT -> decodeProvideEimPackageResult(top);
-            default -> throw new UnsupportedEsipaFunctionException(top.getTagNo());
+            default -> {
+                // TEMP diagnostic: dump the raw body so an unimplemented ESipa function (e.g. the
+                // profile-download relay handshake, tag [57]) can be decoded offline.
+                log.warn("Unsupported ESipa function tag [{}] ({} bytes) — raw body: {}",
+                        top.getTagNo(), body.length, Hex.toHexString(body));
+                throw new UnsupportedEsipaFunctionException(top.getTagNo());
+            }
         };
     }
 
@@ -129,6 +154,244 @@ public class EsipaAsn1Codec {
         }
         // IMPLICIT context tag replacing the universal SEQUENCE tag.
         return encode(new DERTaggedObject(false, TAG_PROVIDE_EIM_PACKAGE_RESULT, new DERSequence(responseContent)));
+    }
+
+    /** Top-level context tag of an EsipaMessageFromIpaToEim (used to route relay functions). */
+    public int topTag(byte[] body) {
+        return asContextTagged(parse(body)).getTagNo();
+    }
+
+    /** Decoded {@code InitiateAuthenticationRequestEsipa [57]} (SGP.32 §6.3.2.1). */
+    public record InitiateAuthRequest(byte[] euiccChallenge, String smdpAddress,
+                                      byte[] euiccInfo1Der, Long eimTransactionId) {}
+
+    /**
+     * Decodes {@code InitiateAuthenticationRequestEsipa ::= [57] SEQUENCE { euiccChallenge [1],
+     * smdpAddress [3] OPTIONAL, euiccInfo1 EUICCInfo1 OPTIONAL, eimTransactionId [2] OPTIONAL }}.
+     * {@code euiccInfo1} is returned as its full DER ([32]/BF20) to forward verbatim to ES9+.
+     */
+    public InitiateAuthRequest decodeInitiateAuthRequest(byte[] body) {
+        ASN1TaggedObject top = asContextTagged(parse(body));
+        if (top.getTagNo() != TAG_INITIATE_AUTHENTICATION) {
+            throw new IllegalArgumentException("Not initiateAuthenticationRequestEsipa: [" + top.getTagNo() + "]");
+        }
+        ASN1Sequence seq = ASN1Sequence.getInstance(top, false);
+        byte[] euiccChallenge = null;
+        String smdpAddress = null;
+        byte[] euiccInfo1 = null;
+        Long eimTransactionId = null;
+        for (ASN1Encodable el : seq) {
+            if (!(el instanceof ASN1TaggedObject t) || t.getTagClass() != BERTags.CONTEXT_SPECIFIC) {
+                continue;
+            }
+            switch (t.getTagNo()) {
+                case 1 -> euiccChallenge = octetsOf(t);
+                case 3 -> smdpAddress = ((ASN1String) t.getBaseUniversal(false, BERTags.UTF8_STRING)).getString();
+                case TAG_EUICC_INFO1 -> euiccInfo1 = derOf(t);
+                case 2 -> eimTransactionId = octetsToLong(octetsOf(t));
+                default -> { /* ignore */ }
+            }
+        }
+        return new InitiateAuthRequest(euiccChallenge, smdpAddress, euiccInfo1, eimTransactionId);
+    }
+
+    /**
+     * Encodes the success response {@code EsipaMessageFromEimToIpa -> initiateAuthenticationResponseEsipa
+     * [57] -> initiateAuthenticationOkEsipa}. The five field byte arrays are the DER of each ASN.1
+     * object as returned by ES9+ (base64-decoded by the caller); {@code transactionId} is its raw
+     * octets. {@code [57]} wraps a CHOICE so it is EXPLICIT, and the "ok" alternative is context [0].
+     */
+    public byte[] encodeInitiateAuthOk(byte[] transactionId, byte[] serverSigned1Der,
+            byte[] serverSignature1Der, byte[] euiccCiPKIdDer, byte[] serverCertificateDer) {
+        ASN1EncodableVector ok = new ASN1EncodableVector();
+        if (transactionId != null) {
+            ok.add(new DERTaggedObject(false, 0, new DEROctetString(transactionId)));  // transactionId [0]
+        }
+        ok.add(parse(serverSigned1Der));         // serverSigned1
+        ok.add(parse(serverSignature1Der));      // serverSignature1 [APPLICATION 55] (5F37 TLV)
+        ok.add(parse(euiccCiPKIdDer));           // euiccCiPKIdentifierToBeUsed OCTET STRING (04 TLV)
+        ok.add(parse(serverCertificateDer));     // serverCertificate
+        ASN1Encodable okChoice = new DERTaggedObject(false, 0, new DERSequence(ok)); // ok alt -> [0]
+        return encode(new DERTaggedObject(true, TAG_INITIATE_AUTHENTICATION, okChoice)); // [57] EXPLICIT
+    }
+
+    /** Encodes {@code initiateAuthenticationResponseEsipa} error alternative (context [1] INTEGER). */
+    public byte[] encodeInitiateAuthError(int errorCode) {
+        ASN1Encodable errChoice = new DERTaggedObject(false, 1, new ASN1Integer(errorCode));
+        return encode(new DERTaggedObject(true, TAG_INITIATE_AUTHENTICATION, errChoice));
+    }
+
+    // ---- ESipa.AuthenticateClient (§6.3.2.2) ----
+
+    /** Decoded {@code AuthenticateClientRequestEsipa [59]}. */
+    public record AuthenticateClientRequest(String transactionIdHex, byte[] authenticateServerResponseDer) {}
+
+    /**
+     * Decodes {@code AuthenticateClientRequestEsipa ::= [59] SEQUENCE { transactionId [0],
+     * authenticateServerResponse [56] }}. {@code authenticateServerResponse} is returned as its full
+     * DER ([56]/BF38) to forward verbatim to ES9+.
+     */
+    public AuthenticateClientRequest decodeAuthenticateClientRequest(byte[] body) {
+        ASN1Sequence seq = ASN1Sequence.getInstance(asContextTagged(parse(body)), false);
+        String transactionId = null;
+        byte[] authenticateServerResponse = null;
+        for (ASN1Encodable el : seq) {
+            if (!(el instanceof ASN1TaggedObject t) || t.getTagClass() != BERTags.CONTEXT_SPECIFIC) {
+                continue;
+            }
+            switch (t.getTagNo()) {
+                case 0 -> transactionId = Hex.toHexString(octetsOf(t));
+                case TAG_AUTHENTICATE_SERVER_RESPONSE -> authenticateServerResponse = derOf(t);
+                default -> { /* ignore */ }
+            }
+        }
+        return new AuthenticateClientRequest(transactionId, authenticateServerResponse);
+    }
+
+    /**
+     * Encodes {@code authenticateClientResponseEsipa [59] -> authenticateClientOkDPEsipa} (the SM-DP+
+     * download case). {@code [59]} wraps a CHOICE (EXPLICIT); the OkDP alternative is context [0].
+     */
+    public byte[] encodeAuthenticateClientOkDP(byte[] transactionId, byte[] profileMetadataDer,
+            byte[] smdpSigned2Der, byte[] smdpSignature2Der, byte[] smdpCertificateDer) {
+        ASN1EncodableVector ok = new ASN1EncodableVector();
+        if (transactionId != null) {
+            ok.add(new DERTaggedObject(false, 0, new DEROctetString(transactionId)));  // transactionId [0]
+        }
+        if (profileMetadataDer != null) {
+            ok.add(parse(profileMetadataDer));   // profileMetaData [37] StoreMetadataRequest (BF25 TLV)
+        }
+        ok.add(parse(smdpSigned2Der));           // smdpSigned2
+        ok.add(parse(smdpSignature2Der));        // smdpSignature2 [APPLICATION 55] (5F37 TLV)
+        ok.add(parse(smdpCertificateDer));       // smdpCertificate
+        ASN1Encodable okDp = new DERTaggedObject(false, 0, new DERSequence(ok)); // OkDP alt -> [0]
+        return encode(new DERTaggedObject(true, TAG_AUTHENTICATE_CLIENT, okDp));
+    }
+
+    /** Encodes {@code authenticateClientResponseEsipa} error alternative (context [2] INTEGER). */
+    public byte[] encodeAuthenticateClientError(int errorCode) {
+        ASN1Encodable errChoice = new DERTaggedObject(false, 2, new ASN1Integer(errorCode));
+        return encode(new DERTaggedObject(true, TAG_AUTHENTICATE_CLIENT, errChoice));
+    }
+
+    // ---- ESipa.GetBoundProfilePackage (§6.3.2.3) ----
+
+    /** Decoded {@code GetBoundProfilePackageRequestEsipa [58]}. */
+    public record GetBoundProfilePackageRequest(String transactionIdHex, byte[] prepareDownloadResponseDer) {}
+
+    /**
+     * Decodes {@code GetBoundProfilePackageRequestEsipa ::= [58] SEQUENCE { transactionId [0],
+     * prepareDownloadResponse [33] }}. {@code prepareDownloadResponse} is returned as its full DER
+     * ([33]/BF21) to forward verbatim to ES9+.
+     */
+    public GetBoundProfilePackageRequest decodeGetBoundProfilePackageRequest(byte[] body) {
+        ASN1Sequence seq = ASN1Sequence.getInstance(asContextTagged(parse(body)), false);
+        String transactionId = null;
+        byte[] prepareDownloadResponse = null;
+        for (ASN1Encodable el : seq) {
+            if (!(el instanceof ASN1TaggedObject t) || t.getTagClass() != BERTags.CONTEXT_SPECIFIC) {
+                continue;
+            }
+            switch (t.getTagNo()) {
+                case 0 -> transactionId = Hex.toHexString(octetsOf(t));
+                case TAG_PREPARE_DOWNLOAD_RESPONSE -> prepareDownloadResponse = derOf(t);
+                default -> { /* ignore */ }
+            }
+        }
+        return new GetBoundProfilePackageRequest(transactionId, prepareDownloadResponse);
+    }
+
+    /**
+     * Encodes {@code getBoundProfilePackageResponseEsipa [58] -> getBoundProfilePackageOkEsipa}
+     * carrying the {@code boundProfilePackage [54]} (BF36). "ok" alternative is context [0].
+     */
+    public byte[] encodeGetBoundProfilePackageOk(byte[] transactionId, byte[] boundProfilePackageDer) {
+        ASN1EncodableVector ok = new ASN1EncodableVector();
+        if (transactionId != null) {
+            ok.add(new DERTaggedObject(false, 0, new DEROctetString(transactionId)));  // transactionId [0]
+        }
+        ok.add(parse(boundProfilePackageDer));   // boundProfilePackage [54] (BF36 TLV)
+        ASN1Encodable okChoice = new DERTaggedObject(false, 0, new DERSequence(ok)); // ok alt -> [0]
+        return encode(new DERTaggedObject(true, TAG_GET_BOUND_PROFILE_PACKAGE, okChoice));
+    }
+
+    /** Encodes {@code getBoundProfilePackageResponseEsipa} error alternative (context [1] INTEGER). */
+    public byte[] encodeGetBoundProfilePackageError(int errorCode) {
+        ASN1Encodable errChoice = new DERTaggedObject(false, 1, new ASN1Integer(errorCode));
+        return encode(new DERTaggedObject(true, TAG_GET_BOUND_PROFILE_PACKAGE, errChoice));
+    }
+
+    // ---- ESipa.HandleNotification (§6.3.2.4) ----
+
+    /** ProfileInstallationResult ::= [55] (BF37). */
+    private static final int TAG_PROFILE_INSTALLATION_RESULT = 55;
+    /** profileInstallationResultData [39] (BF27) within ProfileInstallationResult. */
+    private static final int TAG_PROFILE_INSTALLATION_RESULT_DATA = 39;
+
+    /** Decoded {@code HandleNotificationEsipa [61]} pending-notification. */
+    public record HandleNotification(byte[] pendingNotificationDer, String transactionIdHex) {}
+
+    /**
+     * Decodes {@code HandleNotificationEsipa ::= [61] CHOICE { pendingNotification [0]
+     * PendingNotification, provideEimPackageResult [80] }}. Returns the {@code PendingNotification}
+     * DER (e.g. the {@code profileInstallationResult [55]}) to forward to ES9+ HandleNotification,
+     * plus the transactionId dug out of the ProfileInstallationResult for session correlation.
+     */
+    public HandleNotification decodeHandleNotification(byte[] body) {
+        ASN1TaggedObject top = asContextTagged(parse(body));           // [61] CHOICE (EXPLICIT)
+        ASN1TaggedObject member = (ASN1TaggedObject) top.getExplicitBaseObject();
+        if (member.getTagNo() != 0) {
+            // provideEimPackageResult [80] or other — forward as-is, no transactionId dig.
+            return new HandleNotification(derOf(member.getExplicitBaseObject()), null);
+        }
+        // pendingNotification [0] EXPLICIT wraps the PendingNotification CHOICE alternative.
+        ASN1Primitive pendingNotification = member.getExplicitBaseObject().toASN1Primitive();
+        return new HandleNotification(derOf(pendingNotification), findTransactionId(pendingNotification));
+    }
+
+    private static String findTransactionId(ASN1Primitive pendingNotification) {
+        try {
+            if (!(pendingNotification instanceof ASN1TaggedObject pir)
+                    || pir.getTagNo() != TAG_PROFILE_INSTALLATION_RESULT) {
+                return null;  // not a ProfileInstallationResult (e.g. other notification type)
+            }
+            ASN1Sequence pirSeq = ASN1Sequence.getInstance(pir.getBaseUniversal(false, BERTags.SEQUENCE));
+            for (ASN1Encodable e : pirSeq) {
+                if (e instanceof ASN1TaggedObject data
+                        && data.getTagNo() == TAG_PROFILE_INSTALLATION_RESULT_DATA) {
+                    ASN1Sequence dataSeq = ASN1Sequence.getInstance(data.getBaseUniversal(false, BERTags.SEQUENCE));
+                    for (ASN1Encodable d : dataSeq) {
+                        if (d instanceof ASN1TaggedObject t
+                                && t.getTagClass() == BERTags.CONTEXT_SPECIFIC && t.getTagNo() == 0) {
+                            return Hex.toHexString(octetsOf(t));  // transactionId [0]
+                        }
+                    }
+                }
+            }
+        } catch (Exception ignore) {
+            // best-effort correlation only
+        }
+        return null;
+    }
+
+    private static byte[] octetsOf(ASN1TaggedObject t) {
+        return ((ASN1OctetString) t.getBaseUniversal(false, BERTags.OCTET_STRING)).getOctets();
+    }
+
+    private static byte[] derOf(ASN1Encodable el) {
+        try {
+            return el.toASN1Primitive().getEncoded("DER");
+        } catch (IOException ex) {
+            throw new IllegalStateException("Failed to DER-encode element", ex);
+        }
+    }
+
+    private static long octetsToLong(byte[] bytes) {
+        long v = 0;
+        for (byte b : bytes) {
+            v = (v << 8) | (b & 0xFF);
+        }
+        return v;
     }
 
     private String extractEidHex(ASN1Sequence seq) {

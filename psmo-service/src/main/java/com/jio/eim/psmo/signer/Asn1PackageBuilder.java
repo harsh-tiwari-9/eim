@@ -11,6 +11,7 @@ import org.bouncycastle.asn1.ASN1Encodable;
 import org.bouncycastle.asn1.ASN1EncodableVector;
 import org.bouncycastle.asn1.ASN1Integer;
 import org.bouncycastle.asn1.BERTags;
+import org.bouncycastle.asn1.DERNull;
 import org.bouncycastle.asn1.DEROctetString;
 import org.bouncycastle.asn1.DERSequence;
 import org.bouncycastle.asn1.DERTaggedObject;
@@ -95,6 +96,40 @@ public class Asn1PackageBuilder implements PackageBuilder {
             return euiccPackageRequest.toASN1Primitive().getEncoded("DER");
         } catch (IOException ex) {
             throw new IllegalStateException("Failed to attach eimSignature", ex);
+        }
+    }
+
+    /**
+     * Builds a {@code ProfileDownloadTriggerRequest} ([84] / BF54), unsigned (SGP.32 §2.11.1.3):
+     * <pre>
+     * ProfileDownloadTriggerRequest ::= [84] SEQUENCE {
+     *     profileDownloadData [0] ProfileDownloadData OPTIONAL,   -- CHOICE, so [0] is EXPLICIT
+     *     eimTransactionId    [2] TransactionId OPTIONAL }
+     * ProfileDownloadData ::= CHOICE { activationCode [0] UTF8String, contactDefaultSmdp [1] NULL, ... }
+     * </pre>
+     * A non-blank activation code selects {@code activationCode [0]}; a blank one selects
+     * {@code contactDefaultSmdp [1]}. {@code eimTransactionId} is set to the operationId so the
+     * download outcome can be correlated back (as for PSMOs).
+     */
+    @Override
+    public byte[] buildProfileDownloadTrigger(PsmoCommandMessage message) {
+        try {
+            String ac = message.activationCode();
+            ASN1Encodable profileDownloadData = (ac != null && !ac.isBlank())
+                    ? new DERTaggedObject(false, 0, new DERUTF8String(ac.trim()))  // activationCode [0]
+                    : new DERTaggedObject(false, 1, DERNull.INSTANCE);             // contactDefaultSmdp [1]
+
+            ASN1EncodableVector triggerVec = new ASN1EncodableVector();
+            // profileDownloadData [0] is EXPLICIT because its type is a CHOICE (X.680 auto-tagging).
+            triggerVec.add(new DERTaggedObject(true, 0, profileDownloadData));
+            // eimTransactionId [2] = operationId — the eUICC/IPA echoes it so we can link the result.
+            triggerVec.add(new DERTaggedObject(false, 2, new DEROctetString(transactionId(message.operationId()))));
+
+            // ProfileDownloadTriggerRequest ::= [84] SEQUENCE -- Tag 'BF54'
+            ASN1Encodable trigger = new DERTaggedObject(false, 84, new DERSequence(triggerVec));
+            return trigger.toASN1Primitive().getEncoded("DER");
+        } catch (IOException ex) {
+            throw new IllegalStateException("Failed to DER-encode ProfileDownloadTriggerRequest", ex);
         }
     }
 
