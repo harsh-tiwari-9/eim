@@ -1,5 +1,9 @@
 package com.jio.eim.psmo.service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.jio.eim.psmo.dto.PsmoCommandMessage;
 import com.jio.eim.psmo.dto.PagedResponse;
 import com.jio.eim.psmo.dto.PsmoCommandMessage;
 import com.jio.eim.psmo.dto.PsmoOperationRequest;
@@ -23,21 +27,25 @@ import org.springframework.web.server.ResponseStatusException;
 public class PsmoOperationService {
     private static final String STATUS_PENDING = "PENDING";
     private static final String DEVICE_STATUS_DELETED = "DELETED";
+    private static final String TYPE_DOWNLOAD = "DOWNLOAD";
 
     private final OperationRepository operationRepository;
     private final OperationLogRepository operationLogRepository;
     private final InventoryDeviceLookupRepository deviceLookupRepository;
     private final PsmoCommandProducer commandProducer;
+    private final ObjectMapper objectMapper;
 
     public PsmoOperationService(
             OperationRepository operationRepository,
             OperationLogRepository operationLogRepository,
             InventoryDeviceLookupRepository deviceLookupRepository,
-            PsmoCommandProducer commandProducer) {
+            PsmoCommandProducer commandProducer,
+            ObjectMapper objectMapper) {
         this.operationRepository = operationRepository;
         this.operationLogRepository = operationLogRepository;
         this.deviceLookupRepository = deviceLookupRepository;
         this.commandProducer = commandProducer;
+        this.objectMapper = objectMapper;
     }
 
     @Transactional
@@ -55,10 +63,21 @@ public class PsmoOperationService {
         // The IPAd retrieves and executes them in order on its next poll.
         // No single-pending check — we simply append to the device's queue.
 
+        // DOWNLOAD is not a PSMO: it carries an activation code and results in an unsigned
+        // ProfileDownloadTriggerRequest (BF54). A leading "LPA:" scheme prefix is stripped; a blank
+        // code means "contact the default SM-DP+".
+        String activationCode = null;
+        if (TYPE_DOWNLOAD.equals(request.getType())) {
+            activationCode = normalizeActivationCode(request.getActivationCode());
+        }
+
         Operation operation = new Operation();
         operation.setEid(request.getEid());
         operation.setType(request.getType());
         operation.setTargetIccid(request.getTargetIccid());
+        if (activationCode != null) {
+            operation.setParams(activationCodeParams(activationCode));
+        }
         operation.setStatus(STATUS_PENDING);
         operation.setRequestedBy(requestedBy);
         operation = operationRepository.save(operation);
@@ -70,6 +89,7 @@ public class PsmoOperationService {
                 operation.getEid(),
                 operation.getType(),
                 operation.getTargetIccid(),
+                activationCode,
                 requestedBy,
                 Instant.now());
         commandProducer.send(message);
@@ -105,6 +125,28 @@ public class PsmoOperationService {
 
     private static String blankToNull(String value) {
         return (value == null || value.isBlank()) ? null : value.trim();
+    }
+
+    /** Trims and drops a leading {@code LPA:} scheme prefix; returns null for a blank code. */
+    private static String normalizeActivationCode(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        String code = raw.trim();
+        if (code.regionMatches(true, 0, "LPA:", 0, 4)) {
+            code = code.substring(4).trim();
+        }
+        return code.isEmpty() ? null : code;
+    }
+
+    private String activationCodeParams(String activationCode) {
+        try {
+            ObjectNode node = objectMapper.createObjectNode();
+            node.put("activationCode", activationCode);
+            return objectMapper.writeValueAsString(node);
+        } catch (JsonProcessingException ex) {
+            throw new IllegalStateException("Failed to serialize download params", ex);
+        }
     }
 
     private void writeLog(Long operationId, String eventType, String actor, String details) {
