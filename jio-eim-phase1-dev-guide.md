@@ -974,6 +974,9 @@ The vendor sends `"autoEnable": "false"` as a string, not a boolean. The `parseB
 | GET /api/inventory | ✅ | ✅ | ✅ | ✅ |
 | GET /api/inventory/{eid} | ✅ | ✅ | ✅ | ✅ |
 | DELETE /api/inventory/{eid} | ✅ | ✅ | ❌ | ❌ |
+| POST /api/psmo/operations | ✅ | ❌ | ❌ | ❌ |
+| GET /api/psmo/operations/{id} | ✅ | ✅ | ✅ | ✅ |
+| GET /api/psmo/operations | ✅ | ✅ | ✅ | ✅ |
 
 **Role descriptions:**
 - `SUPER_ADMIN` — full access, manages users
@@ -1083,6 +1086,36 @@ GET /api/inventory query params:
 
 ---
 
+### PSMO — Profile State Management Operations
+
+```
+POST /api/psmo/operations          Submit an operation      (SUPER_ADMIN)
+GET  /api/psmo/operations/{id}      Get one operation        (SUPER_ADMIN, PLATFORM_ENGINEER, READ_ONLY, BSS_SYSTEM)
+GET  /api/psmo/operations           List operation history   (SUPER_ADMIN, PLATFORM_ENGINEER, READ_ONLY, BSS_SYSTEM)
+
+GET /api/psmo/operations query params (all optional):
+  ?eid=8904...                  Filter by device EID
+  ?type=ENABLE                  AUDIT | ENABLE | DISABLE | DELETE | DOWNLOAD
+  ?status=EXECUTED              PENDING | SIGNED | SENT | EXECUTED | FAILED
+  ?page=0&size=20               Pagination (size max 100); newest first
+```
+
+**Submit body** — `targetIccid` required for ENABLE/DISABLE/DELETE (decimal ICCID); omit for AUDIT:
+```json
+{
+  "eid": "89044045910000000000000966075104",
+  "type": "ENABLE",
+  "targetIccid": "89918740407079955539"
+}
+```
+
+Operations are asynchronous: submit returns `202` with `status: "PENDING"`; the eUICC executes it on
+its next poll. Poll `GET /api/psmo/operations/{id}` (or watch the list) until `status` reaches
+`EXECUTED`/`FAILED`. `GET /api/psmo/operations` returns a paged wrapper
+(`content, page, size, totalElements, totalPages, first, last`) of the same operation objects.
+
+---
+
 ## 16. Running the Project
 
 ### Prerequisites
@@ -1178,21 +1211,7 @@ psql -h localhost -U eim -d jio_eim -c "SELECT eid, chain_valid, cert_valid_to F
 
 ## 17. What Comes Next — Sprint 2
 
-### 1. PSMO Engine — Profile State Management
-
-A new service that accepts operations (enable, disable, delete, download), validates state transitions, publishes to Kafka, and manages the command lifecycle.
-
-Tables needed: `operations`, `operation_logs`, `signed_packages`, `replay_counters`.
-
-### 2. Package Signing Service
-
-Consumes from Kafka `psmo.commands`. Uses BouncyCastle to build ASN.1 eUICC packages and sign them with ECDSA P-256. MVP: BouncyCastle keystore. Production: UTIMACO HSM via PKCS#11.
-
-### 3. ESipa Service
-
-The device polling endpoint. `POST /esipa/getEimPackage` — uses Redis O(1) `pending:{eid}` flag check. 99% of device polls return in < 2ms without hitting PostgreSQL.
-
-### 4. Bulk Inventory Upload
+### 1. Bulk Inventory Upload
 
 Replace the synchronous `POST /api/inventory` with:
 - `POST /api/inventory/upload` → stores JSON file in MinIO, creates job, returns 202 + jobId
@@ -1200,13 +1219,13 @@ Replace the synchronous `POST /api/inventory` with:
 - Each record published to Kafka `inventory.ingest`, consumed and stored asynchronously
 - `GET /api/inventory/jobs/{jobId}` → progress tracking via `ingest_jobs.processed_records` counter
 
-### 5. JWT Refresh Tokens
+### 2. JWT Refresh Tokens
 
 Short-lived access tokens (1 hour) + long-lived refresh tokens (7 days). Client uses refresh token to get a new access token silently without re-entering credentials.
 
 New table: `users.refresh_tokens`.
 
-### 6. UTIMACO HSM Integration
+### 3. UTIMACO HSM Integration
 
 Replace BouncyCastle PKCS12 keystore in Package Signing Service with UTIMACO HSM via PKCS#11. Private key never leaves hardware.
 
