@@ -205,9 +205,17 @@ Request:
     `{ "eid": "...", "type": "DOWNLOAD", "activationCode": "1$smdp.example.com$ABC-123" }`.
 - Response `202 Accepted`: `data` = **PsmoOperationResponse** with `status: "PENDING"`.
 
-### GET `/api/psmo/operations/{id}` — get operation status/result · `SUPER_ADMIN`, `PLATFORM_ENGINEER`, `READ_ONLY`, `BSS_SYSTEM`
+### GET `/api/psmo/operations/{id}` — get one operation's status/result · `SUPER_ADMIN`, `PLATFORM_ENGINEER`, `READ_ONLY`, `BSS_SYSTEM`
 `{id}` = `operationId` from submit. `data` = **PsmoOperationResponse**. Poll until `status` is
 `EXECUTED` or `FAILED`.
+
+### GET `/api/psmo/operations` — paginated operation history (ops/logs page) · `SUPER_ADMIN`, `PLATFORM_ENGINEER`, `READ_ONLY`, `BSS_SYSTEM`
+Query params (all optional): `eid`, `type` (`AUDIT|ENABLE|DISABLE|DELETE|DOWNLOAD`),
+`status` (`PENDING|SIGNED|SENT|EXECUTED|FAILED`), `page` (default `0`), `size` (default `20`, max `100`).
+Newest first. `data` = **PagedResponse<PsmoOperationResponse>** (same paged shape as inventory:
+`content`, `page`, `size`, `totalElements`, `totalPages`, `first`, `last`). Each item is the same
+**PsmoOperationResponse** as get-by-id, so the list can click through to a detail view.
+Example: `GET /api/psmo/operations?status=FAILED&type=ENABLE&page=0&size=20`.
 
 **Status lifecycle:** `PENDING` → `SIGNED` → `SENT` (device fetched it) → `EXECUTED` (success) |
 `FAILED` (rejected/errored). `signedAt`/`sentAt`/`completedAt` timestamps mark each transition.
@@ -251,8 +259,5 @@ reach `EXECUTED`.
 
 ## Gaps the UI team should know about (not yet available)
 
-- **No "list PSMO operations" endpoint** — only submit + get-by-id exist. There's no way yet to list
-  operations for a device or globally (e.g. for an operations/history table). Needs a backend
-  endpoint if the UI requires it.
 - **No single-device inventory GET** (`GET /api/inventory/{eid}` is disabled) — use `POST
   /api/inventory/list` with the `eid` filter.
