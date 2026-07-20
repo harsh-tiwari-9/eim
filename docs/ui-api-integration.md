@@ -217,6 +217,13 @@ Newest first. `data` = **PagedResponse<PsmoOperationResponse>** (same paged shap
 **PsmoOperationResponse** as get-by-id, so the list can click through to a detail view.
 Example: `GET /api/psmo/operations?status=FAILED&type=ENABLE&page=0&size=20`.
 
+### POST `/api/psmo/operations/refresh` — refresh statuses of on-screen rows · `SUPER_ADMIN`, `PLATFORM_ENGINEER`, `READ_ONLY`, `BSS_SYSTEM`
+For a polling UI: send the operation ids currently shown (typically the non-terminal ones) and get
+their current state back in one call — instead of one `GET /operations/{id}` per row. Body:
+`{ "operationIds": [101, 102, 103] }` (1–200 ids). `data` = array of **PsmoOperationResponse**,
+ordered to match the requested ids; unknown ids are silently skipped. Poll this every few seconds
+until the rows you care about are `EXECUTED`/`FAILED`.
+
 **Status lifecycle:** `PENDING` → `SIGNED` → `SENT` (device fetched it) → `EXECUTED` (success) |
 `FAILED` (rejected/errored). `signedAt`/`sentAt`/`completedAt` timestamps mark each transition.
 

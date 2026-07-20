@@ -16,6 +16,8 @@ import com.jio.eim.psmo.repository.OperationLogRepository;
 import com.jio.eim.psmo.repository.OperationRepository;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
@@ -108,6 +110,22 @@ public class PsmoOperationService {
     @Transactional(readOnly = true)
     public List<PsmoOperationResponse> listForDevice(String eid) {
         return operationRepository.findByEidOrderByCreatedAtDesc(eid).stream()
+                .map(this::toResponse)
+                .toList();
+    }
+
+    /**
+     * Returns the current state of the given operations, for the UI to refresh the rows it is
+     * showing. Unknown ids are silently skipped; results are ordered to match the requested ids.
+     */
+    @Transactional(readOnly = true)
+    public List<PsmoOperationResponse> refresh(List<Long> operationIds) {
+        Map<Long, Operation> byId = operationRepository.findByIdIn(operationIds).stream()
+                .collect(Collectors.toMap(Operation::getId, o -> o));
+        return operationIds.stream()
+                .distinct()
+                .map(byId::get)
+                .filter(java.util.Objects::nonNull)
                 .map(this::toResponse)
                 .toList();
     }
