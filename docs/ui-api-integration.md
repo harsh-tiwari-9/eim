@@ -231,7 +231,7 @@ their current state back in one call — instead of one `GET /operations/{id}` p
 ordered to match the requested ids; unknown ids are silently skipped. Poll this every few seconds
 until the rows you care about are `EXECUTED`/`FAILED`.
 
-### GET `/api/psmo/devices/{eid}/profiles` — on-card profile info (Profiles Information view) · `SUPER_ADMIN`, `PLATFORM_ENGINEER`, `READ_ONLY`, `BSS_SYSTEM`
+### GET `/api/psmo/profiles?eid=...` — on-card profile info (Profiles Information view) · `SUPER_ADMIN`, `PLATFORM_ENGINEER`, `READ_ONLY`, `BSS_SYSTEM`
 Returns the profiles on the eUICC as of the device's **most recent successful AUDIT**. `data` =
 ```json
 {

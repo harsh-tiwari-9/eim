@@ -41,8 +41,8 @@ public class PsmoController {
     @PostMapping("/operations")
     @PreAuthorize("hasAnyRole('SUPER_ADMIN')")
     public ResponseEntity<ApiResponse<PsmoOperationResponse>> submit(
-        @Valid @RequestBody PsmoOperationRequest request,
-        @RequestHeader("X-User-Email") String requestedBy
+            @Valid @RequestBody PsmoOperationRequest request,
+            @RequestHeader("X-User-Email") String requestedBy
     ) {
         PsmoOperationResponse data = operationService.submit(request, requestedBy);
         return ResponseEntity.status(HttpStatus.ACCEPTED).body(ApiResponse.ok("Operation Accepted", data));
@@ -86,10 +86,11 @@ public class PsmoController {
      * On-card profile information for a device, from its most recent successful AUDIT (the "Profiles
      * Information" view). Returns an empty profile list with {@code auditedAt = null} if the device
      * has never been audited — run a PSMO AUDIT first to populate it.
+     * e.g. {@code GET /api/psmo/profiles?eid=8904...}.
      */
-    @GetMapping("/devices/{eid}/profiles")
+    @GetMapping("/profiles")
     @PreAuthorize("hasAnyRole('SUPER_ADMIN','PLATFORM_ENGINEER','READ_ONLY','BSS_SYSTEM')")
-    public ApiResponse<ProfileInfoResponse> profiles(@PathVariable String eid) {
+    public ApiResponse<ProfileInfoResponse> profiles(@RequestParam String eid) {
         return ApiResponse.ok("Profiles retrieved", operationService.profiles(eid));
     }
 }

@@ -215,7 +215,7 @@ Jwts.builder()
     .subject(userId)
     .claim("role", role)
     .issuedAt(new Date())
-    .expiration(expiry)
+        .expiration(expiry)
     .signWith(secretKey)     // 0.12: algorithm inferred from key type
     .compact();
 
@@ -304,10 +304,10 @@ Our `HeaderAuthFilter` sets it:
 ```java
 // Inside HeaderAuthFilter.doFilterInternal()
 var auth = new UsernamePasswordAuthenticationToken(
-    userId,           // principal (who you are)
-    null,             // credentials (not needed - already authenticated by gateway)
-    List.of(new SimpleGrantedAuthority("ROLE_PLATFORM_ENGINEER"))  // authorities
-);
+                userId,           // principal (who you are)
+                null,             // credentials (not needed - already authenticated by gateway)
+                List.of(new SimpleGrantedAuthority("ROLE_PLATFORM_ENGINEER"))  // authorities
+        );
 SecurityContextHolder.getContext().setAuthentication(auth);
 ```
 
@@ -977,7 +977,7 @@ The vendor sends `"autoEnable": "false"` as a string, not a boolean. The `parseB
 | POST /api/psmo/operations | ✅ | ❌ | ❌ | ❌ |
 | GET /api/psmo/operations/{id} | ✅ | ✅ | ✅ | ✅ |
 | GET /api/psmo/operations | ✅ | ✅ | ✅ | ✅ |
-| GET /api/psmo/devices/{eid}/profiles | ✅ | ✅ | ✅ | ✅ |
+| GET /api/psmo/profiles | ✅ | ✅ | ✅ | ✅ |
 
 **Role descriptions:**
 - `SUPER_ADMIN` — full access, manages users
@@ -1093,7 +1093,7 @@ GET /api/inventory query params:
 POST /api/psmo/operations              Submit an operation       (SUPER_ADMIN)
 GET  /api/psmo/operations/{id}         Get one operation         (SUPER_ADMIN, PLATFORM_ENGINEER, READ_ONLY, BSS_SYSTEM)
 GET  /api/psmo/operations              List operation history    (SUPER_ADMIN, PLATFORM_ENGINEER, READ_ONLY, BSS_SYSTEM)
-GET  /api/psmo/devices/{eid}/profiles  On-card profile info      (SUPER_ADMIN, PLATFORM_ENGINEER, READ_ONLY, BSS_SYSTEM)
+GET  /api/psmo/profiles?eid=8904...    On-card profile info      (SUPER_ADMIN, PLATFORM_ENGINEER, READ_ONLY, BSS_SYSTEM)
 
 GET /api/psmo/operations query params (all optional):
   ?eid=8904...                  Filter by device EID
@@ -1102,7 +1102,7 @@ GET /api/psmo/operations query params (all optional):
   ?page=0&size=20               Pagination (size max 100); newest first
 ```
 
-`GET /api/psmo/devices/{eid}/profiles` returns the eUICC's profiles from the device's most recent
+`GET /api/psmo/profiles?eid=...` returns the eUICC's profiles from the device's most recent
 successful AUDIT: a list of `{ iccid, state, fallbackAttribute, fallbackAllowed, profileClass,
 label, profileName, serviceProviderName }` plus `auditedAt` / `auditOperationId`. Empty list with
 `auditedAt: null` if never audited — run an AUDIT first.
