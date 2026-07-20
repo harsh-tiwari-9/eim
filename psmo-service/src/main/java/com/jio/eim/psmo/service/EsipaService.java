@@ -157,7 +157,7 @@ public class EsipaService {
 
         if (decoded.operationId() == null) {
             log.warn("eIM Package Result from device {} has no eimTransactionId; cannot map to an "
-                    + "operation (seqNumber={}, not acknowledging). details={}",
+                            + "operation (seqNumber={}, not acknowledging). details={}",
                     eid, seqNumber, decoded.details());
             return List.of();
         }
@@ -196,13 +196,15 @@ public class EsipaService {
                 op.getId(), newStatus, eid, seqNumber);
 
         // Reconcile inventory.device_profiles with the on-card truth from a successful AUDIT.
-        // Runs in its own transaction; best-effort, so a sync failure never fails the ack/status.
+        // Use op.getEid() — the ESipa ProvideEimPackageResult may omit the optional eidValue (eid
+        // param can be null), but the operation row always knows the device. Runs in its own
+        // transaction; best-effort, so a sync failure never fails the ack/status.
         if (decoded.success() && TYPE_AUDIT.equals(op.getType())) {
             try {
-                inventoryProfileSyncService.syncFromAuditDetails(eid, decoded.details());
+                inventoryProfileSyncService.syncFromAuditDetails(op.getEid(), decoded.details());
             } catch (Exception ex) {
                 log.warn("Failed to sync device_profiles for {} from AUDIT op {} — inventory may be "
-                        + "stale, operation result unaffected", eid, op.getId(), ex);
+                        + "stale, operation result unaffected", op.getEid(), op.getId(), ex);
             }
         }
         return acknowledgements;
