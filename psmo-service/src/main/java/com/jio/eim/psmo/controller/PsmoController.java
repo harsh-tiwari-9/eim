@@ -2,12 +2,14 @@ package com.jio.eim.psmo.controller;
 
 import com.jio.eim.psmo.dto.ApiResponse;
 import com.jio.eim.psmo.dto.PagedResponse;
+import com.jio.eim.psmo.dto.PsmoOperationRefreshRequest;
 import com.jio.eim.psmo.dto.PsmoOperationRequest;
 import com.jio.eim.psmo.dto.PsmoOperationResponse;
 import com.jio.eim.psmo.service.PsmoOperationService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
+import java.util.List;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
@@ -65,5 +67,17 @@ public class PsmoController {
             @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
         Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
         return ApiResponse.ok("Operations retrieved", operationService.list(eid, type, status, pageable));
+    }
+
+    /**
+     * Refresh the current status of a set of operations — for a polling UI to update the rows it is
+     * showing (typically the non-terminal ones) in one call. Unknown ids are skipped; results are
+     * ordered to match the requested {@code operationIds}.
+     */
+    @PostMapping("/operations/refresh")
+    @PreAuthorize("hasAnyRole('SUPER_ADMIN','PLATFORM_ENGINEER','READ_ONLY','BSS_SYSTEM')")
+    public ApiResponse<List<PsmoOperationResponse>> refresh(
+            @Valid @RequestBody PsmoOperationRefreshRequest request) {
+        return ApiResponse.ok("Operations refreshed", operationService.refresh(request.getOperationIds()));
     }
 }
