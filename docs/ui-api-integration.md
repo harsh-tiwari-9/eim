@@ -168,6 +168,13 @@ Returns a **file stream** (not JSON) — the per-record ingest result. Handle as
 }
 ```
 
+**About `profiles` freshness:** the `profiles[]` list reflects the eIM's stored view in
+`inventory.device_profiles`. It is seeded at device registration and then **reconciled with the
+on-card truth every time a successful `AUDIT` runs for that device** (a successful AUDIT fully
+replaces the stored list with what the eUICC actually reports). So after registration the list may
+be empty or stale; **run a PSMO `AUDIT` to refresh it**, after which this endpoint reflects the
+card. `iccid` is the decimal ICCID; `state` is `enabled`/`disabled`.
+
 **IngestJobResponse shape:**
 ```json
 { "jobId": 42, "status": "COMPLETED", "fileName": "batch1.json", "uploadedBy": "jane@ril.com",
@@ -223,6 +230,28 @@ their current state back in one call — instead of one `GET /operations/{id}` p
 `{ "operationIds": [101, 102, 103] }` (1–200 ids). `data` = array of **PsmoOperationResponse**,
 ordered to match the requested ids; unknown ids are silently skipped. Poll this every few seconds
 until the rows you care about are `EXECUTED`/`FAILED`.
+
+### GET `/api/psmo/devices/{eid}/profiles` — on-card profile info (Profiles Information view) · `SUPER_ADMIN`, `PLATFORM_ENGINEER`, `READ_ONLY`, `BSS_SYSTEM`
+Returns the profiles on the eUICC as of the device's **most recent successful AUDIT**. `data` =
+```json
+{
+  "eid": "8904...5104",
+  "auditedAt": "2026-07-20T09:59:00Z",
+  "auditOperationId": 42,
+  "profiles": [
+    { "iccid": "89918740407079955539", "state": "disabled",
+      "fallbackAttribute": false, "fallbackAllowed": false, "profileClass": "operational",
+      "label": null, "profileName": "RJIO D2 NODA eIOT", "serviceProviderName": "Jio" }
+  ]
+}
+```
+Column mapping: `iccid`, `state` (enabled/disabled), `fallbackAttribute` (Fallback Attribute),
+`fallbackAllowed` (Fallback Allowed), `profileClass` (test/provisioning/operational), `label`
+(nickname), and under *Additional Information* → `profileName` + `serviceProviderName`.
+
+⚠️ This reflects the **last AUDIT**, not live state. If the device was never audited, `profiles` is
+`[]` and `auditedAt` is `null` — submit a PSMO `AUDIT`, poll it to `EXECUTED`, then re-fetch. Use
+`auditedAt` to show an "as of" timestamp.
 
 **Status lifecycle:** `PENDING` → `SIGNED` → `SENT` (device fetched it) → `EXECUTED` (success) |
 `FAILED` (rejected/errored). `signedAt`/`sentAt`/`completedAt` timestamps mark each transition.

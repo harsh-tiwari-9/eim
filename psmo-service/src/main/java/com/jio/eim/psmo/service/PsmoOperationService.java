@@ -1,10 +1,11 @@
 package com.jio.eim.psmo.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.jio.eim.psmo.dto.PsmoCommandMessage;
 import com.jio.eim.psmo.dto.PagedResponse;
+import com.jio.eim.psmo.dto.ProfileInfoResponse;
 import com.jio.eim.psmo.dto.PsmoCommandMessage;
 import com.jio.eim.psmo.dto.PsmoOperationRequest;
 import com.jio.eim.psmo.dto.PsmoOperationResponse;
@@ -128,6 +129,62 @@ public class PsmoOperationService {
                 .filter(java.util.Objects::nonNull)
                 .map(this::toResponse)
                 .toList();
+    }
+
+    /**
+     * On-card profile information for a device, taken from its most recent successful AUDIT. Returns
+     * an empty profile list (with {@code auditedAt = null}) if the device has never been audited.
+     */
+    @Transactional(readOnly = true)
+    public ProfileInfoResponse profiles(String eid) {
+        ProfileInfoResponse response = new ProfileInfoResponse();
+        response.setEid(eid);
+        response.setProfiles(List.of());
+
+        Operation audit = operationRepository
+                .findFirstByEidAndTypeAndStatusOrderByCompletedAtDesc(eid, "AUDIT", "EXECUTED")
+                .orElse(null);
+        if (audit == null || audit.getResultPayload() == null) {
+            return response;  // never audited (or no payload) — empty snapshot
+        }
+
+        response.setAuditedAt(audit.getCompletedAt());
+        response.setAuditOperationId(audit.getId());
+        response.setProfiles(parseProfiles(audit.getResultPayload()));
+        return response;
+    }
+
+    /** Extracts the listProfileInfo profile list out of an AUDIT result_payload JSON string. */
+    private List<ProfileInfoResponse.Profile> parseProfiles(String resultPayloadJson) {
+        try {
+            JsonNode results = objectMapper.readTree(resultPayloadJson).path("results");
+            for (JsonNode result : results) {
+                if ("listProfileInfo".equals(result.path("type").asText())) {
+                    List<ProfileInfoResponse.Profile> out = new java.util.ArrayList<>();
+                    for (JsonNode p : result.path("profiles")) {
+                        ProfileInfoResponse.Profile profile = new ProfileInfoResponse.Profile();
+                        profile.setIccid(text(p, "iccid"));
+                        profile.setState(text(p, "state"));
+                        profile.setProfileClass(text(p, "profileClass"));
+                        profile.setLabel(text(p, "label"));
+                        profile.setProfileName(text(p, "profileName"));
+                        profile.setServiceProviderName(text(p, "serviceProviderName"));
+                        profile.setFallbackAttribute(p.path("fallbackAttribute").asBoolean(false));
+                        profile.setFallbackAllowed(p.path("fallbackAllowed").asBoolean(false));
+                        out.add(profile);
+                    }
+                    return out;
+                }
+            }
+        } catch (Exception ex) {
+            throw new IllegalStateException("Failed to parse AUDIT result payload", ex);
+        }
+        return List.of();
+    }
+
+    private static String text(JsonNode node, String field) {
+        JsonNode v = node.get(field);
+        return (v == null || v.isNull()) ? null : v.asText();
     }
 
     /** Paginated operation history for the UI ops/logs page; all filters optional. */

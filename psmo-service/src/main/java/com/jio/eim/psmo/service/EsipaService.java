@@ -32,6 +32,7 @@ public class EsipaService {
     private static final String STATUS_EXECUTED = "EXECUTED";
     private static final String STATUS_FAILED = "FAILED";
     private static final String TYPE_DOWNLOAD = "DOWNLOAD";
+    private static final String TYPE_AUDIT = "AUDIT";
     private static final String ACTOR = "esipa-service";
 
     private final DevicePendingRepository devicePendingRepository;
@@ -40,6 +41,7 @@ public class EsipaService {
     private final OperationLogRepository operationLogRepository;
     private final EuiccPackageResultDecoder resultDecoder;
     private final ObjectMapper objectMapper;
+    private final InventoryProfileSyncService inventoryProfileSyncService;
 
     @Transactional
     public Optional<byte[]> getNextPackage(String eid, List<EsipaNotification> lastResults) {
@@ -192,6 +194,17 @@ public class EsipaService {
         writeLog(op.getId(), newStatus);
         log.info("Op {} {} from eUICC Package Result (device {}); acknowledging seqNumber {}",
                 op.getId(), newStatus, eid, seqNumber);
+
+        // Reconcile inventory.device_profiles with the on-card truth from a successful AUDIT.
+        // Runs in its own transaction; best-effort, so a sync failure never fails the ack/status.
+        if (decoded.success() && TYPE_AUDIT.equals(op.getType())) {
+            try {
+                inventoryProfileSyncService.syncFromAuditDetails(eid, decoded.details());
+            } catch (Exception ex) {
+                log.warn("Failed to sync device_profiles for {} from AUDIT op {} — inventory may be "
+                        + "stale, operation result unaffected", eid, op.getId(), ex);
+            }
+        }
         return acknowledgements;
     }
 
