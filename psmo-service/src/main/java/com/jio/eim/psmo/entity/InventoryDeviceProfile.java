@@ -34,11 +34,9 @@ public class InventoryDeviceProfile {
     @Column(nullable = false, length = 20)
     private String state;
 
-    @Column(name = "profile_class", length = 1)
-    private String profileClass;
-
-    @Column(name = "mno_id", length = 50)
-    private String mnoId;
+    // Note: profile_class (CHAR(1)) and mno_id are intentionally NOT mapped here — psmo only writes
+    // eid/iccid/state/is_fallback during AUDIT reconciliation, and mapping the CHAR(1) column trips
+    // Hibernate schema validation (bpchar vs varchar). Those columns are owned by inventory-service.
 
     @Column(name = "is_fallback", nullable = false)
     private boolean fallback;
