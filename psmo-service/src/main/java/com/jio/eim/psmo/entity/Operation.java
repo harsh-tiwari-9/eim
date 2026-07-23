@@ -2,8 +2,6 @@ package com.jio.eim.psmo.entity;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
@@ -20,8 +18,9 @@ import org.hibernate.type.SqlTypes;
 @Setter
 public class Operation {
 
+    // Assigned by the application (see OperationIdGenerator): a numeric yyyyMMddHHmmss + per-second
+    // counter id — not a DB sequence. Also used as the on-card eimTransactionId, so it stays a Long.
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
     @Column(nullable = false, length = 32)

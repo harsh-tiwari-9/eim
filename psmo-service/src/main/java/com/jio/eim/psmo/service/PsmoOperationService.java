@@ -38,18 +38,21 @@ public class PsmoOperationService {
     private final InventoryDeviceLookupRepository deviceLookupRepository;
     private final PsmoCommandProducer commandProducer;
     private final ObjectMapper objectMapper;
+    private final OperationIdGenerator operationIdGenerator;
 
     public PsmoOperationService(
             OperationRepository operationRepository,
             OperationLogRepository operationLogRepository,
             InventoryDeviceLookupRepository deviceLookupRepository,
             PsmoCommandProducer commandProducer,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            OperationIdGenerator operationIdGenerator) {
         this.operationRepository = operationRepository;
         this.operationLogRepository = operationLogRepository;
         this.deviceLookupRepository = deviceLookupRepository;
         this.commandProducer = commandProducer;
         this.objectMapper = objectMapper;
+        this.operationIdGenerator = operationIdGenerator;
     }
 
     @Transactional
@@ -87,6 +90,7 @@ public class PsmoOperationService {
         }
 
         Operation operation = new Operation();
+        operation.setId(operationIdGenerator.next());
         operation.setEid(request.getEid());
         operation.setType(request.getType());
         operation.setTargetIccid(request.getTargetIccid());
