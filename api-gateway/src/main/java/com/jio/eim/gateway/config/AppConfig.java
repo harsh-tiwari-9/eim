@@ -3,6 +3,7 @@ package com.jio.eim.gateway.config;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.client.ClientHttpResponse;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.web.client.ResponseErrorHandler;
 import org.springframework.web.client.RestTemplate;
 
@@ -11,7 +12,13 @@ public class AppConfig {
 
     @Bean
     RestTemplate restTemplate() {
-        RestTemplate restTemplate = new RestTemplate();
+        // Buffer the request body (disable output streaming). The JDK HttpURLConnection used by the
+        // default factory throws "HttpRetryException: cannot retry due to server authentication, in
+        // streaming mode" when a downstream returns 401 for a streamed request — it can't re-send
+        // the consumed body. Buffering lets the 401 be read and relayed normally.
+        SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
+        requestFactory.setOutputStreaming(false);
+        RestTemplate restTemplate = new RestTemplate(requestFactory);
         // The gateway is a transparent proxy: downstream 4xx/5xx must be relayed to the client with
         // their real status + body, not thrown. The default error handler throws on any non-2xx,
         // which the proxy would surface as a generic 500 (e.g. a 401 login failure). A no-op handler
