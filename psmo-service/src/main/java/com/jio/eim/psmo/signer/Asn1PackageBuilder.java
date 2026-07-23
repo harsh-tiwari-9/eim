@@ -144,20 +144,22 @@ public class Asn1PackageBuilder implements PackageBuilder {
             //   disable [4] SEQUENCE { iccid [APPLICATION 26] Iccid }
             //   delete  [5] SEQUENCE { iccid [APPLICATION 26] Iccid }
             // rollbackFlag is omitted on ENABLE (we do not request rollback semantics).
-            case "ENABLE" -> new DERTaggedObject(false, 3, new DERSequence(iccidField(message)));
-            case "DISABLE" -> new DERTaggedObject(false, 4, new DERSequence(iccidField(message)));
-            case "DELETE" -> new DERTaggedObject(false, 5, new DERSequence(iccidField(message)));
+            case "ENABLE" -> new DERTaggedObject(false, 3, new DERSequence(iccidField(message.targetIccid(), message)));
+            // DISABLE is executed as enable [3] of the replacement profile (enableIccid). On a
+            // single-port eUICC, enabling it implicitly disables the target profile — so the device
+            // is never left with no active profile. The operation is still recorded as DISABLE.
+            case "DISABLE" -> new DERTaggedObject(false, 3, new DERSequence(iccidField(message.enableIccid(), message)));
+            case "DELETE" -> new DERTaggedObject(false, 5, new DERSequence(iccidField(message.targetIccid(), message)));
             default -> throw new IllegalArgumentException(
                     "Unsupported PSMO type for ASN.1 encoder: " + message.type());
         };
     }
 
     /** iccid [APPLICATION 26] Iccid — the target profile, swapped-BCD encoded per E.118 (tag '5A'). */
-    private ASN1Encodable iccidField(PsmoCommandMessage message) {
-        String iccid = message.targetIccid();
+    private ASN1Encodable iccidField(String iccid, PsmoCommandMessage message) {
         if (iccid == null || iccid.isBlank()) {
             throw new IllegalArgumentException(
-                    message.type() + " requires targetIccid (operation " + message.operationId() + ")");
+                    message.type() + " requires an ICCID (operation " + message.operationId() + ")");
         }
         return new DERTaggedObject(false, BERTags.APPLICATION, 26,
                 new DEROctetString(IccidCodec.toBytes(iccid)));

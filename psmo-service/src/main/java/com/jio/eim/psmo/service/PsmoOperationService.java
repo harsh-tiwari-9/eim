@@ -31,6 +31,7 @@ public class PsmoOperationService {
     private static final String STATUS_PENDING = "PENDING";
     private static final String DEVICE_STATUS_DELETED = "DELETED";
     private static final String TYPE_DOWNLOAD = "DOWNLOAD";
+    private static final String TYPE_DISABLE = "DISABLE";
 
     private final OperationRepository operationRepository;
     private final OperationLogRepository operationLogRepository;
@@ -74,12 +75,25 @@ public class PsmoOperationService {
             activationCode = normalizeActivationCode(request.getActivationCode());
         }
 
+        // DISABLE is executed as "enable the other profile" (single-port eUICC): enabling enableIccid
+        // implicitly disables targetIccid, without stranding the device. Recorded as DISABLE.
+        String enableIccid = null;
+        if (TYPE_DISABLE.equals(request.getType())) {
+            enableIccid = blankToNull(request.getEnableIccid());
+            if (enableIccid == null) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "DISABLE requires enableIccid (the profile to enable in place of the disabled one)");
+            }
+        }
+
         Operation operation = new Operation();
         operation.setEid(request.getEid());
         operation.setType(request.getType());
         operation.setTargetIccid(request.getTargetIccid());
         if (activationCode != null) {
             operation.setParams(activationCodeParams(activationCode));
+        } else if (enableIccid != null) {
+            operation.setParams(enableIccidParams(enableIccid));
         }
         operation.setStatus(STATUS_PENDING);
         operation.setRequestedBy(requestedBy);
@@ -92,6 +106,7 @@ public class PsmoOperationService {
                 operation.getEid(),
                 operation.getType(),
                 operation.getTargetIccid(),
+                enableIccid,
                 activationCode,
                 requestedBy,
                 Instant.now());
@@ -221,6 +236,17 @@ public class PsmoOperationService {
             return objectMapper.writeValueAsString(node);
         } catch (JsonProcessingException ex) {
             throw new IllegalStateException("Failed to serialize download params", ex);
+        }
+    }
+
+    /** Records the profile enabled under the hood for a DISABLE, for traceability in the op record. */
+    private String enableIccidParams(String enableIccid) {
+        try {
+            ObjectNode node = objectMapper.createObjectNode();
+            node.put("enableIccid", enableIccid);
+            return objectMapper.writeValueAsString(node);
+        } catch (JsonProcessingException ex) {
+            throw new IllegalStateException("Failed to serialize disable params", ex);
         }
     }
 
