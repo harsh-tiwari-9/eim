@@ -70,8 +70,19 @@ public class AuthService {
         event.setEventType(eventType);
         event.setIpAddress(request.getRemoteAddr());
         event.setUserAgent(request.getHeader("User-Agent"));
-        event.setDetails(details);
+        // details maps to a jsonb column (@JdbcTypeCode JSON), so a bare string must be encoded as a
+        // JSON string literal — otherwise Postgres rejects it as invalid JSON and the insert fails
+        // (which previously surfaced as a 500 on failed logins, masking the intended 401).
+        event.setDetails(toJsonStringLiteral(details));
         event.setCreatedAt(Instant.now());
         authEventRepository.save(event);
+    }
+
+    /** Encodes a plain string as a JSON string literal for the jsonb {@code details} column. */
+    private static String toJsonStringLiteral(String value) {
+        if (value == null) {
+            return null;
+        }
+        return "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
     }
 }
