@@ -6,6 +6,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import java.time.Instant;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -34,10 +35,29 @@ public class InventoryDeviceProfile {
     @Column(nullable = false, length = 20)
     private String state;
 
-    // Note: profile_class (CHAR(1)) and mno_id are intentionally NOT mapped here — psmo only writes
-    // eid/iccid/state/is_fallback during AUDIT reconciliation, and mapping the CHAR(1) column trips
-    // Hibernate schema validation (bpchar vs varchar). Those columns are owned by inventory-service.
+    // Note: the legacy profile_class (CHAR(1)) and mno_id columns are intentionally NOT mapped here —
+    // mapping the CHAR(1) column trips Hibernate schema validation (bpchar vs varchar), and they are
+    // owned by inventory-service's registration flow. The profile-info fields below (added in V4) are
+    // what psmo maintains: full-replaced on AUDIT, and state kept current on enable/disable/delete.
 
     @Column(name = "is_fallback", nullable = false)
-    private boolean fallback;
+    private boolean fallback;                 // Fallback Attribute
+
+    @Column(name = "fallback_allowed", nullable = false)
+    private boolean fallbackAllowed;
+
+    @Column(name = "profile_class_name", length = 20)
+    private String profileClassName;          // test | provisioning | operational
+
+    @Column(length = 64)
+    private String label;                     // profileNickname
+
+    @Column(name = "profile_name", length = 64)
+    private String profileName;
+
+    @Column(name = "service_provider_name", length = 64)
+    private String serviceProviderName;
+
+    @Column(name = "updated_at")
+    private Instant updatedAt;
 }

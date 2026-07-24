@@ -1,7 +1,6 @@
 package com.jio.eim.psmo.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.jio.eim.psmo.dto.PagedResponse;
@@ -10,12 +9,15 @@ import com.jio.eim.psmo.dto.PsmoCommandMessage;
 import com.jio.eim.psmo.dto.PsmoOperationRequest;
 import com.jio.eim.psmo.dto.PsmoOperationResponse;
 import com.jio.eim.psmo.entity.InventoryDeviceLookup;
+import com.jio.eim.psmo.entity.InventoryDeviceProfile;
 import com.jio.eim.psmo.entity.Operation;
 import com.jio.eim.psmo.entity.OperationLog;
 import com.jio.eim.psmo.repository.InventoryDeviceLookupRepository;
+import com.jio.eim.psmo.repository.InventoryDeviceProfileRepository;
 import com.jio.eim.psmo.repository.OperationLogRepository;
 import com.jio.eim.psmo.repository.OperationRepository;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -23,6 +25,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -39,6 +42,7 @@ public class PsmoOperationService {
     private final PsmoCommandProducer commandProducer;
     private final ObjectMapper objectMapper;
     private final OperationIdGenerator operationIdGenerator;
+    private final InventoryDeviceProfileRepository deviceProfileRepository;
 
     public PsmoOperationService(
             OperationRepository operationRepository,
@@ -46,13 +50,15 @@ public class PsmoOperationService {
             InventoryDeviceLookupRepository deviceLookupRepository,
             PsmoCommandProducer commandProducer,
             ObjectMapper objectMapper,
-            OperationIdGenerator operationIdGenerator) {
+            OperationIdGenerator operationIdGenerator,
+            InventoryDeviceProfileRepository deviceProfileRepository) {
         this.operationRepository = operationRepository;
         this.operationLogRepository = operationLogRepository;
         this.deviceLookupRepository = deviceLookupRepository;
         this.commandProducer = commandProducer;
         this.objectMapper = objectMapper;
         this.operationIdGenerator = operationIdGenerator;
+        this.deviceProfileRepository = deviceProfileRepository;
     }
 
     @Transactional
@@ -119,6 +125,25 @@ public class PsmoOperationService {
         return toResponse(operation);
     }
 
+    /**
+     * Queues a system-initiated AUDIT so the profile view re-syncs with the card after a successful
+     * state-changing operation (enable/disable/delete/download). Executes on the device's next poll.
+     * Runs in its own transaction so a caller in a result-handling transaction is never affected.
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void queueAudit(String eid, String reason) {
+        Operation audit = new Operation();
+        audit.setId(operationIdGenerator.next());
+        audit.setEid(eid);
+        audit.setType("AUDIT");
+        audit.setStatus(STATUS_PENDING);
+        audit.setRequestedBy("system:auto-sync");
+        audit = operationRepository.save(audit);
+        writeLog(audit.getId(), "CREATED", "system:auto-sync", reason);
+        commandProducer.send(new PsmoCommandMessage(
+                audit.getId(), eid, "AUDIT", null, null, null, "system:auto-sync", Instant.now()));
+    }
+
     @Transactional(readOnly = true)
     public PsmoOperationResponse get(long id) {
         Operation operation = operationRepository.findById(id)
@@ -158,52 +183,28 @@ public class PsmoOperationService {
     public ProfileInfoResponse profiles(String eid) {
         ProfileInfoResponse response = new ProfileInfoResponse();
         response.setEid(eid);
-        response.setProfiles(List.of());
 
-        Operation audit = operationRepository
-                .findFirstByEidAndTypeAndStatusOrderByCompletedAtDesc(eid, "AUDIT", "EXECUTED")
-                .orElse(null);
-        if (audit == null || audit.getResultPayload() == null) {
-            return response;  // never audited (or no payload) — empty snapshot
-        }
-
-        response.setAuditedAt(audit.getCompletedAt());
-        response.setAuditOperationId(audit.getId());
-        response.setProfiles(parseProfiles(audit.getResultPayload()));
-        return response;
-    }
-
-    /** Extracts the listProfileInfo profile list out of an AUDIT result_payload JSON string. */
-    private List<ProfileInfoResponse.Profile> parseProfiles(String resultPayloadJson) {
-        try {
-            JsonNode results = objectMapper.readTree(resultPayloadJson).path("results");
-            for (JsonNode result : results) {
-                if ("listProfileInfo".equals(result.path("type").asText())) {
-                    List<ProfileInfoResponse.Profile> out = new java.util.ArrayList<>();
-                    for (JsonNode p : result.path("profiles")) {
-                        ProfileInfoResponse.Profile profile = new ProfileInfoResponse.Profile();
-                        profile.setIccid(text(p, "iccid"));
-                        profile.setState(text(p, "state"));
-                        profile.setProfileClass(text(p, "profileClass"));
-                        profile.setLabel(text(p, "label"));
-                        profile.setProfileName(text(p, "profileName"));
-                        profile.setServiceProviderName(text(p, "serviceProviderName"));
-                        profile.setFallbackAttribute(p.path("fallbackAttribute").asBoolean(false));
-                        profile.setFallbackAllowed(p.path("fallbackAllowed").asBoolean(false));
-                        out.add(profile);
-                    }
-                    return out;
-                }
+        List<InventoryDeviceProfile> rows = deviceProfileRepository.findByEid(eid);
+        List<ProfileInfoResponse.Profile> profiles = new ArrayList<>();
+        Instant latest = null;
+        for (InventoryDeviceProfile r : rows) {
+            ProfileInfoResponse.Profile p = new ProfileInfoResponse.Profile();
+            p.setIccid(r.getIccid());
+            p.setState(r.getState());
+            p.setFallbackAttribute(r.isFallback());
+            p.setFallbackAllowed(r.isFallbackAllowed());
+            p.setProfileClass(r.getProfileClassName());
+            p.setLabel(r.getLabel());
+            p.setProfileName(r.getProfileName());
+            p.setServiceProviderName(r.getServiceProviderName());
+            profiles.add(p);
+            if (r.getUpdatedAt() != null && (latest == null || r.getUpdatedAt().isAfter(latest))) {
+                latest = r.getUpdatedAt();
             }
-        } catch (Exception ex) {
-            throw new IllegalStateException("Failed to parse AUDIT result payload", ex);
         }
-        return List.of();
-    }
-
-    private static String text(JsonNode node, String field) {
-        JsonNode v = node.get(field);
-        return (v == null || v.isNull()) ? null : v.asText();
+        response.setProfiles(profiles);
+        response.setAuditedAt(latest);  // "as of" — when device_profiles was last synced/updated
+        return response;
     }
 
     /** Paginated operation history for the UI ops/logs page; all filters optional. */

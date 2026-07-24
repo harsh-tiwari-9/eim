@@ -33,6 +33,9 @@ public class EsipaService {
     private static final String STATUS_FAILED = "FAILED";
     private static final String TYPE_DOWNLOAD = "DOWNLOAD";
     private static final String TYPE_AUDIT = "AUDIT";
+    private static final String TYPE_ENABLE = "ENABLE";
+    private static final String TYPE_DISABLE = "DISABLE";
+    private static final String TYPE_DELETE = "DELETE";
     private static final String ACTOR = "esipa-service";
 
     private final DevicePendingRepository devicePendingRepository;
@@ -157,7 +160,7 @@ public class EsipaService {
 
         if (decoded.operationId() == null) {
             log.warn("eIM Package Result from device {} has no eimTransactionId; cannot map to an "
-                            + "operation (seqNumber={}, not acknowledging). details={}",
+                    + "operation (seqNumber={}, not acknowledging). details={}",
                     eid, seqNumber, decoded.details());
             return List.of();
         }
@@ -207,7 +210,41 @@ public class EsipaService {
                         + "stale, operation result unaffected", op.getEid(), op.getId(), ex);
             }
         }
+
+        // Keep device_profiles (the profile-info source of truth) current from the op result — no
+        // extra AUDIT needed for state changes, since the effect is fully known from the operation.
+        // enable -> target becomes the sole enabled profile; disable-by-enable -> the enableIccid
+        // becomes enabled (target implicitly disabled); delete -> remove the profile. Best-effort.
+        if (STATUS_EXECUTED.equals(newStatus)) {
+            try {
+                switch (op.getType()) {
+                    case TYPE_ENABLE ->
+                            inventoryProfileSyncService.setEnabled(op.getEid(), op.getTargetIccid());
+                    case TYPE_DISABLE ->
+                            inventoryProfileSyncService.setEnabled(op.getEid(), enableIccidFromParams(op));
+                    case TYPE_DELETE ->
+                            inventoryProfileSyncService.deleteProfile(op.getEid(), op.getTargetIccid());
+                    default -> { /* AUDIT synced above; DOWNLOAD is re-audited from the relay */ }
+                }
+            } catch (Exception ex) {
+                log.warn("Failed to update device_profiles after {} op {} for {}",
+                        op.getType(), op.getId(), op.getEid(), ex);
+            }
+        }
         return acknowledgements;
+    }
+
+    /** Reads the enableIccid recorded in a DISABLE operation's params ({@code {"enableIccid":...}}). */
+    private String enableIccidFromParams(Operation op) {
+        try {
+            if (op.getParams() == null) {
+                return null;
+            }
+            return objectMapper.readTree(op.getParams()).path("enableIccid").asText(null);
+        } catch (Exception ex) {
+            log.warn("Could not read enableIccid from op {} params", op.getId(), ex);
+            return null;
+        }
     }
 
     private void writeLog(Long operationId, String eventType) {

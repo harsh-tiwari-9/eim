@@ -2,6 +2,7 @@ package com.jio.eim.psmo.service;
 
 import com.jio.eim.psmo.entity.InventoryDeviceProfile;
 import com.jio.eim.psmo.repository.InventoryDeviceProfileRepository;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
@@ -56,12 +57,48 @@ public class InventoryProfileSyncService {
             entity.setEid(eid);
             entity.setIccid(iccid);
             entity.setState(state);
-            entity.setFallback(false);
+            entity.setFallback(asBool(p.get("fallbackAttribute")));
+            entity.setFallbackAllowed(asBool(p.get("fallbackAllowed")));
+            entity.setProfileClassName(asString(p.get("profileClass")));
+            entity.setLabel(asString(p.get("label")));
+            entity.setProfileName(asString(p.get("profileName")));
+            entity.setServiceProviderName(asString(p.get("serviceProviderName")));
+            entity.setUpdatedAt(Instant.now());
             profileRepository.save(entity);
             written++;
         }
         log.info("Synced {} profile(s) into inventory.device_profiles for {} from AUDIT", written, eid);
         return written;
+    }
+
+    /**
+     * Applies an enable locally: {@code iccid} becomes the sole enabled profile for {@code eid} (all
+     * others disabled). Covers ENABLE (target) and DISABLE-by-enable (the enableIccid). No AUDIT
+     * needed — the state change is fully known from the operation. Runs in its own transaction.
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void setEnabled(String eid, String enabledIccid) {
+        List<InventoryDeviceProfile> profiles = profileRepository.findByEid(eid);
+        Instant now = Instant.now();
+        boolean matched = false;
+        for (InventoryDeviceProfile p : profiles) {
+            String newState = p.getIccid().equals(enabledIccid) ? "enabled" : "disabled";
+            if (!newState.equals(p.getState())) {
+                p.setState(newState);
+                p.setUpdatedAt(now);
+                profileRepository.save(p);
+            }
+            matched |= p.getIccid().equals(enabledIccid);
+        }
+        if (!matched) {
+            log.warn("setEnabled: iccid {} not in device_profiles for {} — run an AUDIT to populate", enabledIccid, eid);
+        }
+    }
+
+    /** Removes a profile locally after a successful DELETE. Runs in its own transaction. */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void deleteProfile(String eid, String iccid) {
+        profileRepository.deleteByEidAndIccid(eid, iccid);
     }
 
     /** Pulls the profile list out of the decoder's details: results[].type=listProfileInfo -> profiles[]. */
@@ -86,5 +123,9 @@ public class InventoryProfileSyncService {
 
     private static String asString(Object o) {
         return (o == null) ? null : o.toString();
+    }
+
+    private static boolean asBool(Object o) {
+        return (o instanceof Boolean b) ? b : Boolean.parseBoolean(String.valueOf(o));
     }
 }
