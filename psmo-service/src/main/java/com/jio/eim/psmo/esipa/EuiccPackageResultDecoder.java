@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import org.bouncycastle.asn1.ASN1Boolean;
 import org.bouncycastle.asn1.ASN1Encodable;
 import org.bouncycastle.asn1.ASN1Integer;
 import org.bouncycastle.asn1.ASN1OctetString;
@@ -53,11 +54,15 @@ public class EuiccPackageResultDecoder {
     private static final int RESULT_DELETE = 5;   // deleteResult  [5] DeleteProfileResult
     private static final int RESULT_CODE_OK = 0;
 
-    // ProfileInfo field tags (SGP.22)
+    // ProfileInfo field tags (SGP.22 / SGP.32)
     private static final int TAG_ICCID = 26;        // [APPLICATION 26] '5A'
     private static final int TAG_PROFILE_STATE = 112; // [112] '9F70'
+    private static final int TAG_PROFILE_NICKNAME = 16; // [16] '90' -> UI "Label"
     private static final int TAG_SPN = 17;          // [17] '91'
     private static final int TAG_PROFILE_NAME = 18;  // [18] '92'
+    private static final int TAG_PROFILE_CLASS = 21; // [21] '95'
+    private static final int TAG_FALLBACK_ATTRIBUTE = 38;  // [38] '9F26' BOOLEAN
+    private static final int TAG_FALLBACK_ALLOWED = 103;   // [103] '9F67' BOOLEAN
 
     /**
      * @param sequenceNumber the result's {@code seqNumber} (present for signed results) — echoed
@@ -242,8 +247,12 @@ public class EuiccPackageResultDecoder {
                     switch (t.getTagNo()) {
                         case TAG_PROFILE_STATE -> out.put("state",
                                 integer(t) == 1 ? "enabled" : "disabled");
+                        case TAG_PROFILE_NICKNAME -> out.put("label", utf8(t));
                         case TAG_SPN -> out.put("serviceProviderName", utf8(t));
                         case TAG_PROFILE_NAME -> out.put("profileName", utf8(t));
+                        case TAG_PROFILE_CLASS -> out.put("profileClass", profileClassName(integer(t)));
+                        case TAG_FALLBACK_ATTRIBUTE -> out.put("fallbackAttribute", bool(t));
+                        case TAG_FALLBACK_ALLOWED -> out.put("fallbackAllowed", bool(t));
                         default -> { /* ignore other ProfileInfo fields */ }
                     }
                 }
@@ -307,6 +316,20 @@ public class EuiccPackageResultDecoder {
 
     private static int integer(ASN1TaggedObject t) {
         return ((ASN1Integer) t.getBaseUniversal(false, BERTags.INTEGER)).getValue().intValue();
+    }
+
+    private static boolean bool(ASN1TaggedObject t) {
+        return ((ASN1Boolean) t.getBaseUniversal(false, BERTags.BOOLEAN)).isTrue();
+    }
+
+    /** SGP.22 ProfileClass enum: 0=test, 1=provisioning, 2=operational. */
+    private static String profileClassName(int code) {
+        return switch (code) {
+            case 0 -> "test";
+            case 1 -> "provisioning";
+            case 2 -> "operational";
+            default -> String.valueOf(code);
+        };
     }
 
     private static byte[] octets(ASN1TaggedObject t) {

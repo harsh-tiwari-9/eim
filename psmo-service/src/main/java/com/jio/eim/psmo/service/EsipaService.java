@@ -32,6 +32,10 @@ public class EsipaService {
     private static final String STATUS_EXECUTED = "EXECUTED";
     private static final String STATUS_FAILED = "FAILED";
     private static final String TYPE_DOWNLOAD = "DOWNLOAD";
+    private static final String TYPE_AUDIT = "AUDIT";
+    private static final String TYPE_ENABLE = "ENABLE";
+    private static final String TYPE_DISABLE = "DISABLE";
+    private static final String TYPE_DELETE = "DELETE";
     private static final String ACTOR = "esipa-service";
 
     private final DevicePendingRepository devicePendingRepository;
@@ -40,6 +44,7 @@ public class EsipaService {
     private final OperationLogRepository operationLogRepository;
     private final EuiccPackageResultDecoder resultDecoder;
     private final ObjectMapper objectMapper;
+    private final InventoryProfileSyncService inventoryProfileSyncService;
 
     @Transactional
     public Optional<byte[]> getNextPackage(String eid, List<EsipaNotification> lastResults) {
@@ -192,7 +197,54 @@ public class EsipaService {
         writeLog(op.getId(), newStatus);
         log.info("Op {} {} from eUICC Package Result (device {}); acknowledging seqNumber {}",
                 op.getId(), newStatus, eid, seqNumber);
+
+        // Reconcile inventory.device_profiles with the on-card truth from a successful AUDIT.
+        // Use op.getEid() — the ESipa ProvideEimPackageResult may omit the optional eidValue (eid
+        // param can be null), but the operation row always knows the device. Runs in its own
+        // transaction; best-effort, so a sync failure never fails the ack/status.
+        if (decoded.success() && TYPE_AUDIT.equals(op.getType())) {
+            try {
+                inventoryProfileSyncService.syncFromAuditDetails(op.getEid(), decoded.details());
+            } catch (Exception ex) {
+                log.warn("Failed to sync device_profiles for {} from AUDIT op {} — inventory may be "
+                        + "stale, operation result unaffected", op.getEid(), op.getId(), ex);
+            }
+        }
+
+        // Keep device_profiles (the profile-info source of truth) current from the op result — no
+        // extra AUDIT needed for state changes, since the effect is fully known from the operation.
+        // enable -> target becomes the sole enabled profile; disable-by-enable -> the enableIccid
+        // becomes enabled (target implicitly disabled); delete -> remove the profile. Best-effort.
+        if (STATUS_EXECUTED.equals(newStatus)) {
+            try {
+                switch (op.getType()) {
+                    case TYPE_ENABLE ->
+                            inventoryProfileSyncService.setEnabled(op.getEid(), op.getTargetIccid());
+                    case TYPE_DISABLE ->
+                            inventoryProfileSyncService.setEnabled(op.getEid(), enableIccidFromParams(op));
+                    case TYPE_DELETE ->
+                            inventoryProfileSyncService.deleteProfile(op.getEid(), op.getTargetIccid());
+                    default -> { /* AUDIT synced above; DOWNLOAD is re-audited from the relay */ }
+                }
+            } catch (Exception ex) {
+                log.warn("Failed to update device_profiles after {} op {} for {}",
+                        op.getType(), op.getId(), op.getEid(), ex);
+            }
+        }
         return acknowledgements;
+    }
+
+    /** Reads the enableIccid recorded in a DISABLE operation's params ({@code {"enableIccid":...}}). */
+    private String enableIccidFromParams(Operation op) {
+        try {
+            if (op.getParams() == null) {
+                return null;
+            }
+            return objectMapper.readTree(op.getParams()).path("enableIccid").asText(null);
+        } catch (Exception ex) {
+            log.warn("Could not read enableIccid from op {} params", op.getId(), ex);
+            return null;
+        }
     }
 
     private void writeLog(Long operationId, String eventType) {

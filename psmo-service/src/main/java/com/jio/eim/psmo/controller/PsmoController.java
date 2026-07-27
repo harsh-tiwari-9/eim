@@ -2,6 +2,7 @@ package com.jio.eim.psmo.controller;
 
 import com.jio.eim.psmo.dto.ApiResponse;
 import com.jio.eim.psmo.dto.PagedResponse;
+import com.jio.eim.psmo.dto.ProfileInfoResponse;
 import com.jio.eim.psmo.dto.PsmoOperationRefreshRequest;
 import com.jio.eim.psmo.dto.PsmoOperationRequest;
 import com.jio.eim.psmo.dto.PsmoOperationResponse;
@@ -40,8 +41,8 @@ public class PsmoController {
     @PostMapping("/operations")
     @PreAuthorize("hasAnyRole('SUPER_ADMIN')")
     public ResponseEntity<ApiResponse<PsmoOperationResponse>> submit(
-        @Valid @RequestBody PsmoOperationRequest request,
-        @RequestHeader("X-User-Email") String requestedBy
+            @Valid @RequestBody PsmoOperationRequest request,
+            @RequestHeader("X-User-Email") String requestedBy
     ) {
         PsmoOperationResponse data = operationService.submit(request, requestedBy);
         return ResponseEntity.status(HttpStatus.ACCEPTED).body(ApiResponse.ok("Operation Accepted", data));
@@ -79,5 +80,17 @@ public class PsmoController {
     public ApiResponse<List<PsmoOperationResponse>> refresh(
             @Valid @RequestBody PsmoOperationRefreshRequest request) {
         return ApiResponse.ok("Operations refreshed", operationService.refresh(request.getOperationIds()));
+    }
+
+    /**
+     * On-card profile information for a device, from its most recent successful AUDIT (the "Profiles
+     * Information" view). Returns an empty profile list with {@code auditedAt = null} if the device
+     * has never been audited — run a PSMO AUDIT first to populate it.
+     * e.g. {@code GET /api/psmo/profiles?eid=8904...}.
+     */
+    @GetMapping("/profiles")
+    @PreAuthorize("hasAnyRole('SUPER_ADMIN','PLATFORM_ENGINEER','READ_ONLY','BSS_SYSTEM')")
+    public ApiResponse<ProfileInfoResponse> profiles(@RequestParam String eid) {
+        return ApiResponse.ok("Profiles retrieved", operationService.profiles(eid));
     }
 }

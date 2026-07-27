@@ -18,8 +18,15 @@ public class PsmoOperationRequest {
     @Pattern(regexp = "AUDIT|ENABLE|DISABLE|DELETE|DOWNLOAD")
     private String type;
 
-    /** Target profile ICCID (decimal) for ENABLE/DISABLE/DELETE. */
+    /** Target profile ICCID (decimal) for ENABLE/DISABLE/DELETE — the profile being acted on. */
     private String targetIccid;
+
+    /**
+     * For DISABLE only: the ICCID to enable instead. On a single-port eUICC only one profile can be
+     * enabled, so "disable X" is executed as "enable Y" — enabling Y implicitly disables X, keeping
+     * the device connected. The operation is still recorded/shown as DISABLE of {@code targetIccid}.
+     */
+    private String enableIccid;
 
     /**
      * For DOWNLOAD: the SGP.22 activation code (e.g. {@code 1$smdp.example.com$MATCHING-ID}); a

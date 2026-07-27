@@ -42,12 +42,12 @@ public class AuthService {
 
         if (user == null || !passwordEncoder.matches(request.getPassword(), user.getPasswordHash())) {
             logEvent(null, LOGIN_FAILED, httpRequest, "Invalid credentials");
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid username or password");
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid username or password");
         }
 
         if (!ACTIVE.equals(user.getStatus())) {
             logEvent(user.getId(), LOGIN_FAILED, httpRequest, "Account not active");
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Account is suspended");
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Account is suspended");
         }
 
         user.setLastLogin(Instant.now());
@@ -70,8 +70,19 @@ public class AuthService {
         event.setEventType(eventType);
         event.setIpAddress(request.getRemoteAddr());
         event.setUserAgent(request.getHeader("User-Agent"));
-        event.setDetails(details);
+        // details maps to a jsonb column (@JdbcTypeCode JSON), so a bare string must be encoded as a
+        // JSON string literal — otherwise Postgres rejects it as invalid JSON and the insert fails
+        // (which previously surfaced as a 500 on failed logins, masking the intended 401).
+        event.setDetails(toJsonStringLiteral(details));
         event.setCreatedAt(Instant.now());
         authEventRepository.save(event);
+    }
+
+    /** Encodes a plain string as a JSON string literal for the jsonb {@code details} column. */
+    private static String toJsonStringLiteral(String value) {
+        if (value == null) {
+            return null;
+        }
+        return "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
     }
 }

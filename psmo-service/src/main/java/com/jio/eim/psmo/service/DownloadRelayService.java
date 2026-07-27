@@ -43,6 +43,7 @@ public class DownloadRelayService {
     private final DownloadSessionRepository sessionRepository;
     private final OperationRepository operationRepository;
     private final ObjectMapper objectMapper;
+    private final PsmoOperationService psmoOperationService;
 
     /**
      * ESipa.InitiateAuthentication: forward the eUICC challenge/info to the SM-DP+ and return the
@@ -199,6 +200,15 @@ public class DownloadRelayService {
         session.setStatus(STATUS_COMPLETED);
         sessionRepository.save(session);
         markOperationExecuted(session.getOperationId());
+
+        // Auto-sync the profile view: a completed download adds a new profile whose details are only
+        // known by re-reading the card, so queue an AUDIT (runs on the device's next poll).
+        try {
+            psmoOperationService.queueAudit(session.getEid(), "auto-sync after DOWNLOAD");
+        } catch (Exception ex) {
+            log.warn("Failed to auto-queue AUDIT after download for session {}",
+                    session.getTransactionId(), ex);
+        }
         return EMPTY_ACK;
     }
 

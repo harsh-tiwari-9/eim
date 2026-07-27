@@ -3,18 +3,21 @@ package com.jio.eim.psmo.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.jio.eim.psmo.dto.PsmoCommandMessage;
 import com.jio.eim.psmo.dto.PagedResponse;
+import com.jio.eim.psmo.dto.ProfileInfoResponse;
 import com.jio.eim.psmo.dto.PsmoCommandMessage;
 import com.jio.eim.psmo.dto.PsmoOperationRequest;
 import com.jio.eim.psmo.dto.PsmoOperationResponse;
 import com.jio.eim.psmo.entity.InventoryDeviceLookup;
+import com.jio.eim.psmo.entity.InventoryDeviceProfile;
 import com.jio.eim.psmo.entity.Operation;
 import com.jio.eim.psmo.entity.OperationLog;
 import com.jio.eim.psmo.repository.InventoryDeviceLookupRepository;
+import com.jio.eim.psmo.repository.InventoryDeviceProfileRepository;
 import com.jio.eim.psmo.repository.OperationLogRepository;
 import com.jio.eim.psmo.repository.OperationRepository;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -22,6 +25,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -30,24 +34,31 @@ public class PsmoOperationService {
     private static final String STATUS_PENDING = "PENDING";
     private static final String DEVICE_STATUS_DELETED = "DELETED";
     private static final String TYPE_DOWNLOAD = "DOWNLOAD";
+    private static final String TYPE_DISABLE = "DISABLE";
 
     private final OperationRepository operationRepository;
     private final OperationLogRepository operationLogRepository;
     private final InventoryDeviceLookupRepository deviceLookupRepository;
     private final PsmoCommandProducer commandProducer;
     private final ObjectMapper objectMapper;
+    private final OperationIdGenerator operationIdGenerator;
+    private final InventoryDeviceProfileRepository deviceProfileRepository;
 
     public PsmoOperationService(
             OperationRepository operationRepository,
             OperationLogRepository operationLogRepository,
             InventoryDeviceLookupRepository deviceLookupRepository,
             PsmoCommandProducer commandProducer,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            OperationIdGenerator operationIdGenerator,
+            InventoryDeviceProfileRepository deviceProfileRepository) {
         this.operationRepository = operationRepository;
         this.operationLogRepository = operationLogRepository;
         this.deviceLookupRepository = deviceLookupRepository;
         this.commandProducer = commandProducer;
         this.objectMapper = objectMapper;
+        this.operationIdGenerator = operationIdGenerator;
+        this.deviceProfileRepository = deviceProfileRepository;
     }
 
     @Transactional
@@ -73,12 +84,26 @@ public class PsmoOperationService {
             activationCode = normalizeActivationCode(request.getActivationCode());
         }
 
+        // DISABLE is executed as "enable the other profile" (single-port eUICC): enabling enableIccid
+        // implicitly disables targetIccid, without stranding the device. Recorded as DISABLE.
+        String enableIccid = null;
+        if (TYPE_DISABLE.equals(request.getType())) {
+            enableIccid = blankToNull(request.getEnableIccid());
+            if (enableIccid == null) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "DISABLE requires enableIccid (the profile to enable in place of the disabled one)");
+            }
+        }
+
         Operation operation = new Operation();
+        operation.setId(operationIdGenerator.next());
         operation.setEid(request.getEid());
         operation.setType(request.getType());
         operation.setTargetIccid(request.getTargetIccid());
         if (activationCode != null) {
             operation.setParams(activationCodeParams(activationCode));
+        } else if (enableIccid != null) {
+            operation.setParams(enableIccidParams(enableIccid));
         }
         operation.setStatus(STATUS_PENDING);
         operation.setRequestedBy(requestedBy);
@@ -91,12 +116,32 @@ public class PsmoOperationService {
                 operation.getEid(),
                 operation.getType(),
                 operation.getTargetIccid(),
+                enableIccid,
                 activationCode,
                 requestedBy,
                 Instant.now());
         commandProducer.send(message);
 
         return toResponse(operation);
+    }
+
+    /**
+     * Queues a system-initiated AUDIT so the profile view re-syncs with the card after a successful
+     * state-changing operation (enable/disable/delete/download). Executes on the device's next poll.
+     * Runs in its own transaction so a caller in a result-handling transaction is never affected.
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void queueAudit(String eid, String reason) {
+        Operation audit = new Operation();
+        audit.setId(operationIdGenerator.next());
+        audit.setEid(eid);
+        audit.setType("AUDIT");
+        audit.setStatus(STATUS_PENDING);
+        audit.setRequestedBy("system:auto-sync");
+        audit = operationRepository.save(audit);
+        writeLog(audit.getId(), "CREATED", "system:auto-sync", reason);
+        commandProducer.send(new PsmoCommandMessage(
+                audit.getId(), eid, "AUDIT", null, null, null, "system:auto-sync", Instant.now()));
     }
 
     @Transactional(readOnly = true)
@@ -128,6 +173,38 @@ public class PsmoOperationService {
                 .filter(java.util.Objects::nonNull)
                 .map(this::toResponse)
                 .toList();
+    }
+
+    /**
+     * On-card profile information for a device, taken from its most recent successful AUDIT. Returns
+     * an empty profile list (with {@code auditedAt = null}) if the device has never been audited.
+     */
+    @Transactional(readOnly = true)
+    public ProfileInfoResponse profiles(String eid) {
+        ProfileInfoResponse response = new ProfileInfoResponse();
+        response.setEid(eid);
+
+        List<InventoryDeviceProfile> rows = deviceProfileRepository.findByEid(eid);
+        List<ProfileInfoResponse.Profile> profiles = new ArrayList<>();
+        Instant latest = null;
+        for (InventoryDeviceProfile r : rows) {
+            ProfileInfoResponse.Profile p = new ProfileInfoResponse.Profile();
+            p.setIccid(r.getIccid());
+            p.setState(r.getState());
+            p.setFallbackAttribute(r.isFallback());
+            p.setFallbackAllowed(r.isFallbackAllowed());
+            p.setProfileClass(r.getProfileClassName());
+            p.setLabel(r.getLabel());
+            p.setProfileName(r.getProfileName());
+            p.setServiceProviderName(r.getServiceProviderName());
+            profiles.add(p);
+            if (r.getUpdatedAt() != null && (latest == null || r.getUpdatedAt().isAfter(latest))) {
+                latest = r.getUpdatedAt();
+            }
+        }
+        response.setProfiles(profiles);
+        response.setAuditedAt(latest);  // "as of" — when device_profiles was last synced/updated
+        return response;
     }
 
     /** Paginated operation history for the UI ops/logs page; all filters optional. */
@@ -164,6 +241,17 @@ public class PsmoOperationService {
             return objectMapper.writeValueAsString(node);
         } catch (JsonProcessingException ex) {
             throw new IllegalStateException("Failed to serialize download params", ex);
+        }
+    }
+
+    /** Records the profile enabled under the hood for a DISABLE, for traceability in the op record. */
+    private String enableIccidParams(String enableIccid) {
+        try {
+            ObjectNode node = objectMapper.createObjectNode();
+            node.put("enableIccid", enableIccid);
+            return objectMapper.writeValueAsString(node);
+        } catch (JsonProcessingException ex) {
+            throw new IllegalStateException("Failed to serialize disable params", ex);
         }
     }
 

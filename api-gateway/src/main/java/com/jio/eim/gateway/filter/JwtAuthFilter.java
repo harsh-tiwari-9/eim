@@ -27,6 +27,10 @@ public class JwtAuthFilter extends OncePerRequestFilter {
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
+        // CORS preflight requests carry no Authorization header — never require a token for them.
+        if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
+            return true;
+        }
         String path = request.getRequestURI();
         return path.startsWith("/api/auth/")
                 || path.startsWith("/actuator/health")
