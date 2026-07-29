@@ -260,8 +260,22 @@ public class PsmoOperationService {
         log.setOperationId(operationId);
         log.setEventType(eventType);
         log.setActor(actor);
-        log.setDetails(details);
+        // details is a jsonb column: a plain-text reason (e.g. "auto-sync after DOWNLOAD") must be
+        // encoded as a JSON value, or Postgres rejects it ("invalid input syntax for type json").
+        log.setDetails(toJsonDetails(details));
         operationLogRepository.save(log);
+    }
+
+    /** Wraps a free-text reason as a JSON string so it is valid jsonb; passes null through. */
+    private String toJsonDetails(String details) {
+        if (details == null) {
+            return null;
+        }
+        try {
+            return objectMapper.writeValueAsString(details);
+        } catch (JsonProcessingException ex) {
+            throw new IllegalStateException("Failed to serialize operation log details", ex);
+        }
     }
 
     private PsmoOperationResponse toResponse(Operation o) {
