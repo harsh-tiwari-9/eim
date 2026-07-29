@@ -41,8 +41,8 @@ public class PsmoController {
     @PostMapping("/operations")
     @PreAuthorize("hasAnyRole('SUPER_ADMIN')")
     public ResponseEntity<ApiResponse<PsmoOperationResponse>> submit(
-            @Valid @RequestBody PsmoOperationRequest request,
-            @RequestHeader("X-User-Email") String requestedBy
+        @Valid @RequestBody PsmoOperationRequest request,
+        @RequestHeader("X-User-Email") String requestedBy
     ) {
         PsmoOperationResponse data = operationService.submit(request, requestedBy);
         return ResponseEntity.status(HttpStatus.ACCEPTED).body(ApiResponse.ok("Operation Accepted", data));
