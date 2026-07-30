@@ -1,6 +1,7 @@
 package com.jio.eim.psmo.controller;
 
 import com.jio.eim.psmo.dto.ApiResponse;
+import com.jio.eim.psmo.dto.DeviceEuiccInfoResponse;
 import com.jio.eim.psmo.dto.PagedResponse;
 import com.jio.eim.psmo.dto.ProfileInfoResponse;
 import com.jio.eim.psmo.dto.PsmoOperationRefreshRequest;
@@ -92,5 +93,18 @@ public class PsmoController {
     @PreAuthorize("hasAnyRole('SUPER_ADMIN','PLATFORM_ENGINEER','READ_ONLY','BSS_SYSTEM')")
     public ApiResponse<ProfileInfoResponse> profiles(@RequestParam String eid) {
         return ApiResponse.ok("Profiles retrieved", operationService.profiles(eid));
+    }
+
+    /**
+     * psmo-owned device-detail fields for the device-info panel: the eUICC data from the most recent
+     * successful {@code EUICC_DATA} operation (default SM-DP+, root SM-DS, profile version, SVN,
+     * firmware, TAC) plus last-audit and last-poll timestamps. Fields are null until an
+     * {@code EUICC_DATA} op has succeeded — run one to populate it.
+     * e.g. {@code GET /api/psmo/devices/8904.../euicc-info}.
+     */
+    @GetMapping("/devices/{eid}/euicc-info")
+    @PreAuthorize("hasAnyRole('SUPER_ADMIN','PLATFORM_ENGINEER','READ_ONLY','BSS_SYSTEM')")
+    public ApiResponse<DeviceEuiccInfoResponse> euiccInfo(@PathVariable String eid) {
+        return ApiResponse.ok("eUICC info retrieved", operationService.deviceEuiccInfo(eid));
     }
 }
