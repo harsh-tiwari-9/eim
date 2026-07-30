@@ -47,6 +47,7 @@ public class PsmoOperationService {
     private final OperationIdGenerator operationIdGenerator;
     private final InventoryDeviceProfileRepository deviceProfileRepository;
     private final PollHistoryRepository pollHistoryRepository;
+    private final String eimId;
 
     public PsmoOperationService(
             OperationRepository operationRepository,
@@ -56,7 +57,8 @@ public class PsmoOperationService {
             ObjectMapper objectMapper,
             OperationIdGenerator operationIdGenerator,
             InventoryDeviceProfileRepository deviceProfileRepository,
-            PollHistoryRepository pollHistoryRepository) {
+            PollHistoryRepository pollHistoryRepository,
+            @org.springframework.beans.factory.annotation.Value("${eim.psmo.eim-id:id1}") String eimId) {
         this.operationRepository = operationRepository;
         this.operationLogRepository = operationLogRepository;
         this.deviceLookupRepository = deviceLookupRepository;
@@ -65,6 +67,7 @@ public class PsmoOperationService {
         this.operationIdGenerator = operationIdGenerator;
         this.deviceProfileRepository = deviceProfileRepository;
         this.pollHistoryRepository = pollHistoryRepository;
+        this.eimId = eimId;
     }
 
     @Transactional
@@ -247,7 +250,7 @@ public class PsmoOperationService {
                 .map(Operation::getCompletedAt).orElse(null);
         Instant lastPolledAt = pollHistoryRepository.findMaxPolledAtByEid(eid).orElse(null);
 
-        return new DeviceEuiccInfoResponse(eid, defaultSmdp, rootSmds, profileVersion, svn, firmware, tac,
+        return new DeviceEuiccInfoResponse(eid, eimId, defaultSmdp, rootSmds, profileVersion, svn, firmware, tac,
                 euiccDataAt, lastAuditAt, lastPolledAt);
     }
 

@@ -10,6 +10,7 @@ import java.time.Instant;
  */
 public record DeviceEuiccInfoResponse(
         String eid,
+        String eimId,          // this eIM's identity (the configured FQDN) that manages the device
         String defaultSmdpAddress,
         String rootSmdsAddress,
         String profileVersion,
