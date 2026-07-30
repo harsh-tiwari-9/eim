@@ -14,4 +14,12 @@ public interface PackageBuilder {
      * to start an RSP download; the download itself is authenticated between eUICC and SM-DP+.
      */
     byte[] buildProfileDownloadTrigger(PsmoCommandMessage message);
+
+    /**
+     * Builds a spec {@code IpaEuiccDataRequest} ([82] / BF52) for an EUICC_DATA operation — a read of
+     * the IPA/eUICC's own data (EID, EUICCInfo1/2, configured SM-DP+/SM-DS addresses, …). Like the
+     * download trigger it is NOT signed: the IPA answers it directly, returning an {@code IpaEuiccData}
+     * in its {@code ProvideEimPackageResult} on a later poll.
+     */
+    byte[] buildIpaEuiccDataRequest(PsmoCommandMessage message);
 }

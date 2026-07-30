@@ -39,6 +39,15 @@ public class Asn1PackageBuilder implements PackageBuilder {
     // associationToken data object with value 0: [4] INTEGER 0  ->  '84 01 00' (no token configured).
     private static final byte[] ASSOCIATION_TOKEN_ZERO = {(byte) 0x84, 0x01, 0x00};
 
+    // eUICC-data tags the IpaEuiccDataRequest.tagList requests (SGP.32 v1.2 §2.11.2.2). Each entry is
+    // the tag of an item returned in IpaEuiccData:
+    //   81 = default SM-DP+ address, 83 = root SM-DS address, BF20 = EUICCInfo1 (SVN),
+    //   BF22 = EUICCInfo2 (profileVersion/svn/euiccFirmwareVer), A8 = IPA capabilities,
+    //   A9 = device info (TAC). Add A0/A2/84/A5/A6 later if we want notifications/results/certs.
+    private static final byte[] REQUESTED_EUICC_DATA_TAGS = {
+            (byte) 0x81, (byte) 0x83, (byte) 0xBF, 0x20, (byte) 0xBF, 0x22, (byte) 0xA8, (byte) 0xA9
+    };
+
     private final String eimId;
     private final EimPackageCounterRepository counterRepository;
 
@@ -130,6 +139,44 @@ public class Asn1PackageBuilder implements PackageBuilder {
             return trigger.toASN1Primitive().getEncoded("DER");
         } catch (IOException ex) {
             throw new IllegalStateException("Failed to DER-encode ProfileDownloadTriggerRequest", ex);
+        }
+    }
+
+    /**
+     * Builds an {@code IpaEuiccDataRequest} ([82] / BF52), unsigned — a read of the IPA/eUICC data
+     * (SVN, firmware, profile version, configured SM-DP+/SM-DS addresses, IPA capabilities, device
+     * info). Verified against SGP.32 v1.2 §2.11.2.2:
+     *
+     * <pre>
+     * IpaEuiccDataRequest ::= [82] SEQUENCE {                       -- Tag 'BF52'
+     *     tagList                     [APPLICATION 28] OCTET STRING, -- Tag '5C', the data-item tags
+     *     euiccCiPKIdentifierToBeUsed OCTET STRING OPTIONAL,
+     *     searchCriteriaNotification  [1] CHOICE {...} OPTIONAL,
+     *     searchCriteriaEuiccPackageResult [2] CHOICE {...} OPTIONAL,
+     *     eimTransactionId            [3] TransactionId OPTIONAL }   -- Tag '83'
+     * </pre>
+     *
+     * We send only {@code tagList} (the items we want, {@link #REQUESTED_EUICC_DATA_TAGS}) and
+     * {@code eimTransactionId [3]} = operationId, which the IPA echoes in {@code IpaEuiccData [7]} so
+     * the response correlates back to this operation.
+     */
+    @Override
+    public byte[] buildIpaEuiccDataRequest(PsmoCommandMessage message) {
+        try {
+            // tagList [APPLICATION 28] OCTET STRING (tag '5C') — which eUICC data items to return.
+            ASN1Encodable tagList = new DERTaggedObject(false, BERTags.APPLICATION, 28,
+                    new DEROctetString(REQUESTED_EUICC_DATA_TAGS));
+
+            ASN1EncodableVector vec = new ASN1EncodableVector();
+            vec.add(tagList);
+            // eimTransactionId [3] (tag '83') = operationId — the IPA echoes it so we link the result.
+            vec.add(new DERTaggedObject(false, 3, new DEROctetString(transactionId(message.operationId()))));
+
+            // IpaEuiccDataRequest ::= [82] SEQUENCE -- Tag 'BF52'
+            ASN1Encodable req = new DERTaggedObject(false, 82, new DERSequence(vec));
+            return req.toASN1Primitive().getEncoded("DER");
+        } catch (IOException ex) {
+            throw new IllegalStateException("Failed to DER-encode IpaEuiccDataRequest", ex);
         }
     }
 

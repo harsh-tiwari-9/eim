@@ -28,8 +28,10 @@ public class PackageSigningService {
     private static final String STATUS_FAILED = "FAILED";
     private static final String PACKAGE_FORMAT_ASN1 = "ASN1";
     private static final String PACKAGE_FORMAT_DL_TRIGGER = "DL_TRIGGER";
+    private static final String PACKAGE_FORMAT_EUICC_DATA_REQ = "EUICC_DATA_REQ";
     private static final String SIGNATURE_ALG_NONE = "none";
     private static final String TYPE_DOWNLOAD = "DOWNLOAD";
+    private static final String TYPE_EUICC_DATA = "EUICC_DATA";
     private static final String ACTOR = "package-signer";
 
     private final OperationRepository operationRepository;
@@ -75,6 +77,12 @@ public class PackageSigningService {
                 // DOWNLOAD is not a signed EuiccPackage — it's an unsigned ProfileDownloadTriggerRequest.
                 finalBytes = packageBuilder.buildProfileDownloadTrigger(message);
                 packageFormat = PACKAGE_FORMAT_DL_TRIGGER;
+                signatureAlg = SIGNATURE_ALG_NONE;
+                signatureBytes = null;
+            } else if (TYPE_EUICC_DATA.equals(message.type())) {
+                // EUICC_DATA is an unsigned IpaEuiccDataRequest — the IPA answers it directly (a read).
+                finalBytes = packageBuilder.buildIpaEuiccDataRequest(message);
+                packageFormat = PACKAGE_FORMAT_EUICC_DATA_REQ;
                 signatureAlg = SIGNATURE_ALG_NONE;
                 signatureBytes = null;
             } else {
