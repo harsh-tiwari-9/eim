@@ -4,13 +4,16 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jio.eim.psmo.dto.EsipaNotification;
 import com.jio.eim.psmo.esipa.EuiccPackageResultDecoder;
+import com.jio.eim.psmo.esipa.IpaEuiccDataDecoder;
 import com.jio.eim.psmo.entity.DevicePending;
 import com.jio.eim.psmo.entity.Operation;
 import com.jio.eim.psmo.entity.OperationLog;
+import com.jio.eim.psmo.entity.PollHistory;
 import com.jio.eim.psmo.entity.SignedPackage;
 import com.jio.eim.psmo.repository.DevicePendingRepository;
 import com.jio.eim.psmo.repository.OperationLogRepository;
 import com.jio.eim.psmo.repository.OperationRepository;
+import com.jio.eim.psmo.repository.PollHistoryRepository;
 import com.jio.eim.psmo.repository.SignedPackageRepository;
 import java.time.Instant;
 import java.util.List;
@@ -42,7 +45,9 @@ public class EsipaService {
     private final SignedPackageRepository signedPackageRepository;
     private final OperationRepository operationRepository;
     private final OperationLogRepository operationLogRepository;
+    private final PollHistoryRepository pollHistoryRepository;
     private final EuiccPackageResultDecoder resultDecoder;
+    private final IpaEuiccDataDecoder ipaEuiccDataDecoder;
     private final ObjectMapper objectMapper;
     private final InventoryProfileSyncService inventoryProfileSyncService;
 
@@ -60,6 +65,7 @@ public class EsipaService {
 
         Optional<DevicePending> pendingOpt = devicePendingRepository.findFirstByEidOrderByQueuedAtAsc(eid);
         if(pendingOpt.isEmpty()) {
+            recordPoll(eid, null);
             return Optional.empty();
         }
         DevicePending pending = pendingOpt.get();
@@ -92,7 +98,17 @@ public class EsipaService {
             log.debug("Re-serving op {} (status={}) to device {}", op.getId(), op.getStatus(), eid);
         }
 
+        recordPoll(eid, op.getId());
         return Optional.of(pkg.getPackageBytes());
+    }
+
+    /** Append one poll record (see {@link PollHistory}); {@code servedOperationId} null for empty polls. */
+    private void recordPoll(String eid, Long servedOperationId) {
+        PollHistory poll = new PollHistory();
+        poll.setEid(eid);
+        poll.setHadPackage(servedOperationId != null);
+        poll.setOperationId(servedOperationId);
+        pollHistoryRepository.save(poll);
     }
 
     @Transactional
@@ -232,6 +248,60 @@ public class EsipaService {
             }
         }
         return acknowledgements;
+    }
+
+    /**
+     * Applies an {@code IpaEuiccDataResponse} (BF52) delivered in a {@code ProvideEimPackageResult} —
+     * the reply to an {@code EUICC_DATA} ({@code IpaEuiccDataRequest}) operation. Correlated to the
+     * {@link Operation} by the echoed {@code eimTransactionId} (= operationId) exactly like
+     * {@link #applyEuiccPackageResult}; the decoded eUICC data (SVN, firmware, profile version,
+     * default SM-DP+/root SM-DS, TAC) is stored in {@code result_payload}.
+     *
+     * <p>Unlike a {@code EuiccPackageResult}, an {@code IpaEuiccData} carries no {@code seqNumber}: it
+     * is a live reply to the request we served, not a stored result the eUICC re-delivers. So there is
+     * nothing to acknowledge — we dequeue the request and return an empty ack list (bare {@code BF5000}).
+     */
+    @Transactional
+    public List<Integer> applyIpaEuiccData(String eid, byte[] ipaEuiccDataResponse) {
+        if (ipaEuiccDataResponse == null || ipaEuiccDataResponse.length == 0) {
+            log.warn("Empty IpaEuiccDataResponse from device {}", eid);
+            return List.of();
+        }
+
+        IpaEuiccDataDecoder.Decoded decoded = ipaEuiccDataDecoder.decode(ipaEuiccDataResponse);
+        if (decoded.operationId() == null) {
+            log.warn("IpaEuiccDataResponse from device {} has no eimTransactionId; cannot map to an "
+                    + "operation. details={}", eid, decoded.details());
+            return List.of();
+        }
+
+        Operation op = operationRepository.findById(decoded.operationId()).orElse(null);
+        if (op == null) {
+            log.warn("IpaEuiccDataResponse references unknown operation {} (device {})",
+                    decoded.operationId(), eid);
+            return List.of();
+        }
+        if (STATUS_EXECUTED.equals(op.getStatus()) || STATUS_FAILED.equals(op.getStatus())) {
+            log.info("Op {} already terminal ({}); ignoring duplicate IpaEuiccData", op.getId(), op.getStatus());
+            return List.of();
+        }
+
+        String newStatus = decoded.success() ? STATUS_EXECUTED : STATUS_FAILED;
+        op.setStatus(newStatus);
+        op.setCompletedAt(Instant.now());
+        try {
+            op.setResultPayload(objectMapper.writeValueAsString(decoded.details()));
+        } catch (JsonProcessingException ex) {
+            throw new IllegalStateException("Failed to serialize IpaEuiccData", ex);
+        }
+        operationRepository.save(op);
+        devicePendingRepository.deleteByOperationId(op.getId());
+
+        writeLog(op.getId(), "RESULT_RECEIVED");
+        writeLog(op.getId(), newStatus);
+        log.info("Op {} {} from IpaEuiccData (device {}); fields={}",
+                op.getId(), newStatus, eid, decoded.details().keySet());
+        return List.of();
     }
 
     /** Reads the enableIccid recorded in a DISABLE operation's params ({@code {"enableIccid":...}}). */

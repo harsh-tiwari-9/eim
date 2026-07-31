@@ -42,6 +42,10 @@ public class EsipaAsn1Codec {
     static final int TAG_GET_EIM_PACKAGE = 79;
     /** Context tag of provideEimPackageResult{,Response} (BF50). */
     static final int TAG_PROVIDE_EIM_PACKAGE_RESULT = 80;
+    /** EimPackageResult CHOICE alternative: euiccPackageResult [81] (BF51) — PSMO/AUDIT results. */
+    public static final int TAG_EUICC_PACKAGE_RESULT = 81;
+    /** EimPackageResult CHOICE alternative: ipaEuiccDataResponse [82] (BF52) — EUICC_DATA response. */
+    public static final int TAG_IPA_EUICC_DATA_RESPONSE = 82;
     /** Context tag of initiateAuthentication{Request,Response}Esipa (BF39). */
     public static final int TAG_INITIATE_AUTHENTICATION = 57;
     /** Context tag of getBoundProfilePackage{Request,Response}Esipa (BF3A). */
@@ -159,6 +163,16 @@ public class EsipaAsn1Codec {
     /** Top-level context tag of an EsipaMessageFromIpaToEim (used to route relay functions). */
     public int topTag(byte[] body) {
         return asContextTagged(parse(body)).getTagNo();
+    }
+
+    /**
+     * The context tag of the {@code EimPackageResult} CHOICE alternative carried in a
+     * {@code ProvideEimPackageResult} — {@link #TAG_EUICC_PACKAGE_RESULT} (81, PSMO/AUDIT) or
+     * {@link #TAG_IPA_EUICC_DATA_RESPONSE} (82, EUICC_DATA). Returns -1 if not a context-tagged object.
+     */
+    public int resultAlternativeTag(byte[] eimPackageResultDer) {
+        return (parse(eimPackageResultDer) instanceof ASN1TaggedObject t
+                && t.getTagClass() == BERTags.CONTEXT_SPECIFIC) ? t.getTagNo() : -1;
     }
 
     /** Decoded {@code InitiateAuthenticationRequestEsipa [57]} (SGP.32 §6.3.2.1). */

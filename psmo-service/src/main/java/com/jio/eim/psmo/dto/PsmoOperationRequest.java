@@ -15,7 +15,7 @@ public class PsmoOperationRequest {
     private String eid;
 
     @NotBlank
-    @Pattern(regexp = "AUDIT|ENABLE|DISABLE|DELETE|DOWNLOAD")
+    @Pattern(regexp = "AUDIT|ENABLE|DISABLE|DELETE|DOWNLOAD|EUICC_DATA")
     private String type;
 
     /** Target profile ICCID (decimal) for ENABLE/DISABLE/DELETE — the profile being acted on. */
