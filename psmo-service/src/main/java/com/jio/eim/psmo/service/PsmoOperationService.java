@@ -1,8 +1,10 @@
 package com.jio.eim.psmo.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.jio.eim.psmo.dto.DeviceEuiccInfoResponse;
 import com.jio.eim.psmo.dto.PagedResponse;
 import com.jio.eim.psmo.dto.ProfileInfoResponse;
 import com.jio.eim.psmo.dto.PsmoCommandMessage;
@@ -16,6 +18,7 @@ import com.jio.eim.psmo.repository.InventoryDeviceLookupRepository;
 import com.jio.eim.psmo.repository.InventoryDeviceProfileRepository;
 import com.jio.eim.psmo.repository.OperationLogRepository;
 import com.jio.eim.psmo.repository.OperationRepository;
+import com.jio.eim.psmo.repository.PollHistoryRepository;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -43,6 +46,8 @@ public class PsmoOperationService {
     private final ObjectMapper objectMapper;
     private final OperationIdGenerator operationIdGenerator;
     private final InventoryDeviceProfileRepository deviceProfileRepository;
+    private final PollHistoryRepository pollHistoryRepository;
+    private final String eimId;
 
     public PsmoOperationService(
             OperationRepository operationRepository,
@@ -51,7 +56,9 @@ public class PsmoOperationService {
             PsmoCommandProducer commandProducer,
             ObjectMapper objectMapper,
             OperationIdGenerator operationIdGenerator,
-            InventoryDeviceProfileRepository deviceProfileRepository) {
+            InventoryDeviceProfileRepository deviceProfileRepository,
+            PollHistoryRepository pollHistoryRepository,
+            @org.springframework.beans.factory.annotation.Value("${eim.psmo.eim-id:id1}") String eimId) {
         this.operationRepository = operationRepository;
         this.operationLogRepository = operationLogRepository;
         this.deviceLookupRepository = deviceLookupRepository;
@@ -59,6 +66,8 @@ public class PsmoOperationService {
         this.objectMapper = objectMapper;
         this.operationIdGenerator = operationIdGenerator;
         this.deviceProfileRepository = deviceProfileRepository;
+        this.pollHistoryRepository = pollHistoryRepository;
+        this.eimId = eimId;
     }
 
     @Transactional
@@ -205,6 +214,49 @@ public class PsmoOperationService {
         response.setProfiles(profiles);
         response.setAuditedAt(latest);  // "as of" — when device_profiles was last synced/updated
         return response;
+    }
+
+    /**
+     * psmo-owned device-detail fields: the eUICC data from the most recent successful
+     * {@code EUICC_DATA} operation (default SM-DP+, root SM-DS, profile version, SVN, firmware, TAC)
+     * plus last-audit and last-poll timestamps. eUICC fields are null until an {@code EUICC_DATA} op
+     * has succeeded. Reuses the same "latest op of a type" lookup as {@link #profiles(String)}.
+     */
+    @Transactional(readOnly = true)
+    public DeviceEuiccInfoResponse deviceEuiccInfo(String eid) {
+        String defaultSmdp = null, rootSmds = null, profileVersion = null, svn = null, firmware = null, tac = null;
+        Instant euiccDataAt = null;
+
+        Operation euiccOp = operationRepository
+                .findFirstByEidAndTypeAndStatusOrderByCompletedAtDesc(eid, "EUICC_DATA", "EXECUTED")
+                .orElse(null);
+        if (euiccOp != null && euiccOp.getResultPayload() != null) {
+            try {
+                JsonNode n = objectMapper.readTree(euiccOp.getResultPayload());
+                defaultSmdp = text(n, "defaultSmdpAddress");
+                rootSmds = text(n, "rootSmdsAddress");
+                profileVersion = text(n, "profileVersion");
+                svn = text(n, "svn");
+                firmware = text(n, "euiccFirmwareVer");
+                tac = text(n, "tac");
+                euiccDataAt = euiccOp.getCompletedAt();
+            } catch (JsonProcessingException ex) {
+                throw new IllegalStateException("Failed to read EUICC_DATA result payload for " + eid, ex);
+            }
+        }
+
+        Instant lastAuditAt = operationRepository
+                .findFirstByEidAndTypeAndStatusOrderByCompletedAtDesc(eid, "AUDIT", "EXECUTED")
+                .map(Operation::getCompletedAt).orElse(null);
+        Instant lastPolledAt = pollHistoryRepository.findMaxPolledAtByEid(eid).orElse(null);
+
+        return new DeviceEuiccInfoResponse(eid, eimId, defaultSmdp, rootSmds, profileVersion, svn, firmware, tac,
+                euiccDataAt, lastAuditAt, lastPolledAt);
+    }
+
+    private static String text(JsonNode node, String field) {
+        JsonNode v = node.get(field);
+        return (v == null || v.isNull()) ? null : v.asText();
     }
 
     /** Paginated operation history for the UI ops/logs page; all filters optional. */

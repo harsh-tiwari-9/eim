@@ -62,7 +62,17 @@ public class EsipaAsn1Service {
                 yield codec.encodeGetEimPackageResponse(pkg.orElse(null));
             }
             case PROVIDE_EIM_PACKAGE_RESULT -> {
-                List<Integer> acks = esipaService.applyEuiccPackageResult(msg.eidHex(), msg.eimPackageResult());
+                byte[] result = msg.eimPackageResult();
+                // EimPackageResult is a CHOICE: euiccPackageResult [81]/BF51 (PSMO/AUDIT) or
+                // ipaEuiccDataResponse [82]/BF52 (EUICC_DATA). Route on the alternative tag.
+                List<Integer> acks;
+                if (result != null
+                        && codec.resultAlternativeTag(result) == EsipaAsn1Codec.TAG_IPA_EUICC_DATA_RESPONSE) {
+                    log.info("ESipa: IpaEuiccData result from device {}", msg.eidHex());
+                    acks = esipaService.applyIpaEuiccData(msg.eidHex(), result);
+                } else {
+                    acks = esipaService.applyEuiccPackageResult(msg.eidHex(), result);
+                }
                 if (!acks.isEmpty()) {
                     log.info("ESipa: acknowledging eUICC result seqNumber(s) {} to device {}",
                             acks, msg.eidHex());
