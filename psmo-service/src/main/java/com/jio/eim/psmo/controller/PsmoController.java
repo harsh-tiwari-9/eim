@@ -11,6 +11,7 @@ import com.jio.eim.psmo.service.PsmoOperationService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.Pattern;
 import java.util.List;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -98,13 +99,14 @@ public class PsmoController {
     /**
      * psmo-owned device-detail fields for the device-info panel: the eUICC data from the most recent
      * successful {@code EUICC_DATA} operation (default SM-DP+, root SM-DS, profile version, SVN,
-     * firmware, TAC) plus last-audit and last-poll timestamps. Fields are null until an
+     * firmware, TAC), the eIM id, plus last-audit and last-poll timestamps. Fields are null until an
      * {@code EUICC_DATA} op has succeeded — run one to populate it.
-     * e.g. {@code GET /api/psmo/devices/8904.../euicc-info}.
+     * e.g. {@code GET /api/psmo/devices/euicc-info?eid=8904...}.
      */
-    @GetMapping("/devices/{eid}/euicc-info")
+    @GetMapping("/devices/euicc-info")
     @PreAuthorize("hasAnyRole('SUPER_ADMIN','PLATFORM_ENGINEER','READ_ONLY','BSS_SYSTEM')")
-    public ApiResponse<DeviceEuiccInfoResponse> euiccInfo(@PathVariable String eid) {
+    public ApiResponse<DeviceEuiccInfoResponse> euiccInfo(
+            @RequestParam @Pattern(regexp = "[0-9A-F]{20,32}") String eid) {
         return ApiResponse.ok("eUICC info retrieved", operationService.deviceEuiccInfo(eid));
     }
 }
